@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>App de Inventário</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <h1>App de Inventário</h1>
+      <p>Menu principal com Equipe e Inventário</p>
+    </header>
+
+    <nav class="menu-buttons">
+      <button id="btn-home" class="nav-btn active">Início</button>
+      <button id="btn-team" class="nav-btn">Equipe</button>
+      <button id="btn-inventory" class="nav-btn">Inventário</button>
+    </nav>
+
+    <main class="page-content">
+      <section id="home-page" class="page-section active">
+        <div class="card">
+          <h2>Bem-vindo</h2>
+          <p>Use o menu para gerenciar equipes e itens de inventário.</p>
+          <div class="home-actions">
+            <button id="goto-team" class="primary">Ir para Equipe</button>
+            <button id="goto-inventory" class="primary">Ir para Inventário</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="team-page" class="page-section">
+        <div class="card">
+          <h2>Registro de Equipes</h2>
+          <form id="team-form" class="form-grid">
+            <label>
+              Nome da primeira pessoa
+              <input type="text" id="team-name1" placeholder="Nome 1" required />
+            </label>
+            <label>
+              Nome da segunda pessoa
+              <input type="text" id="team-name2" placeholder="Nome 2" required />
+            </label>
+            <button type="submit" class="primary">Cadastrar equipe</button>
+          </form>
+          <div id="team-message" class="message"></div>
+        </div>
+
+        <div class="card">
+          <h3>Equipes cadastradas</h3>
+          <div id="team-list" class="list-grid"></div>
+        </div>
+      </section>
+
+      <section id="inventory-page" class="page-section">
+        <div class="card">
+          <h2>Inventário da equipe</h2>
+          <form id="inventory-team-form" class="form-grid">
+            <label>
+              ID da equipe
+              <input type="number" id="inventory-team-id" placeholder="Digite o ID" required min="1" />
+            </label>
+            <button type="submit" class="primary">Carregar equipe</button>
+          </form>
+          <div id="inventory-team-info" class="team-info"></div>
+          <div id="inventory-message" class="message"></div>
+        </div>
+
+        <div class="card hidden" id="inventory-create-card">
+          <h3>Adicionar item para esta equipe</h3>
+          <form id="item-form" class="form-grid">
+            <label>
+              Nome do item
+              <input type="text" id="item-name" placeholder="Item" required />
+            </label>
+            <label>
+              Quantidade base
+              <input type="number" id="item-base" placeholder="Quantidade base" required min="1" />
+            </label>
+            <button type="submit" class="primary">Criar item</button>
+          </form>
+        </div>
+
+        <div class="card hidden" id="inventory-list-card">
+          <h3>Itens da equipe</h3>
+          <div id="inventory-items" class="list-grid"></div>
+        </div>
+
+        <div class="card hidden" id="selected-item-card">
+          <h3>Registro de quantidade</h3>
+          <div id="selected-item-info"></div>
+          <form id="item-register-form" class="form-grid">
+            <label>
+              Quantidade encontrada
+              <input type="number" id="item-found-qty" placeholder="Digite a quantidade" required min="0" />
+            </label>
+            <button type="submit" class="primary">Registrar quantidade</button>
+          </form>
+          <div id="register-message" class="message"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="script.js"></script>
+</body>
+</html>
