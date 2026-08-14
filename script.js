@@ -61,10 +61,10 @@ function attachNavigation() {
   ];
 
   buttons.forEach(({ button, section }) => {
-    if (button) button.addEventListener('click', () => showSection(section));
+    button.addEventListener('click', () => showSection(section));
   });
-  if (gotoTeam) gotoTeam.addEventListener('click', () => showSection('team'));
-  if (gotoInventory) gotoInventory.addEventListener('click', () => showSection('inventory'));
+  gotoTeam.addEventListener('click', () => showSection('team'));
+  gotoInventory.addEventListener('click', () => showSection('inventory'));
 }
 
 function showSection(sectionKey) {
@@ -83,34 +83,26 @@ function showSection(sectionKey) {
 }
 
 function attachForms() {
-  if (teamForm) {
-    teamForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      await createTeam();
-    });
-  }
+  teamForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await createTeam();
+  });
 
-  if (inventoryTeamForm) {
-    inventoryTeamForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const teamId = Number(teamIdInput.value);
-      await loadInventoryForTeam(teamId);
-    });
-  }
+  inventoryTeamForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const teamId = Number(teamIdInput.value);
+    await loadInventoryForTeam(teamId);
+  });
 
-  if (itemForm) {
-    itemForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      await createItemForCurrentTeam();
-    });
-  }
+  itemForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await createItemForCurrentTeam();
+  });
 
-  if (itemRegisterForm) {
-    itemRegisterForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      await registerItemQuantity();
-    });
-  }
+  itemRegisterForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await registerItemQuantity();
+  });
 }
 
 async function loadTeams() {
@@ -345,21 +337,26 @@ async function createItemForCurrentTeam() {
     inventoryMessage.textContent = 'Carregue uma equipe antes de criar itens.';
     return;
   }
-  const name = itemNameInput.value.trim();
-  const base_quantity = Number(itemBaseInput.value);
-  if (!name || !base_quantity || base_quantity < 1) {
-    inventoryMessage.textContent = 'Preencha nome e quantidade base válida.';
-    return;
-  }
-  const { error } = await supabase.from('inventory_items').insert({
+  // We no longer require entering the item name or base quantity via the UI.
+  // Keep the inputs and the original logic here as comments for reference.
+  // const name = itemNameInput.value.trim();
+  // const base_quantity = Number(itemBaseInput.value);
+  // if (!name || !base_quantity || base_quantity < 1) {
+  //   inventoryMessage.textContent = 'Preencha nome e quantidade base válida.';
+  //   return;
+  // }
+
+  const payload = {
     team_id: state.currentTeam.id,
     assigned_team_id: state.currentTeam.id,
-    name,
-    base_quantity,
+    // name: name, // intentionally omitted per new requirement
+    // base_quantity: base_quantity, // intentionally omitted per new requirement
     attempts: 0,
     resolved: false,
     removed: false,
-  });
+  };
+
+  const { error } = await supabase.from('inventory_items').insert(payload);
   if (error) {
     inventoryMessage.textContent = 'Erro ao criar o item.';
     return;

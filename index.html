@@ -68,9 +68,12 @@
           <div id="inventory-message" class="message"></div>
         </div>
 
-        <div class="card hidden" id="inventory-create-card">
+        <div class="card hidden" id="inventory-create-card" style="display:none">
           <h3>Adicionar item para esta equipe</h3>
           <form id="item-form" class="form-grid">
+            <!-- Campos para nome do item e quantidade base removidos da UI conforme novo fluxo.
+                 Mantidos aqui como comentário para referência. -->
+            <!--
             <label>
               Nome do item
               <input type="text" id="item-name" placeholder="Item" required />
@@ -79,6 +82,7 @@
               Quantidade base
               <input type="number" id="item-base" placeholder="Quantidade base" required min="1" />
             </label>
+            -->
             <button type="submit" class="primary">Criar item</button>
           </form>
         </div>
