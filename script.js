@@ -61,10 +61,10 @@ function attachNavigation() {
   ];
 
   buttons.forEach(({ button, section }) => {
-    button.addEventListener('click', () => showSection(section));
+    if (button) button.addEventListener('click', () => showSection(section));
   });
-  gotoTeam.addEventListener('click', () => showSection('team'));
-  gotoInventory.addEventListener('click', () => showSection('inventory'));
+  if (gotoTeam) gotoTeam.addEventListener('click', () => showSection('team'));
+  if (gotoInventory) gotoInventory.addEventListener('click', () => showSection('inventory'));
 }
 
 function showSection(sectionKey) {
@@ -83,26 +83,34 @@ function showSection(sectionKey) {
 }
 
 function attachForms() {
-  teamForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    await createTeam();
-  });
+  if (teamForm) {
+    teamForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      await createTeam();
+    });
+  }
 
-  inventoryTeamForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const teamId = Number(teamIdInput.value);
-    await loadInventoryForTeam(teamId);
-  });
+  if (inventoryTeamForm) {
+    inventoryTeamForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const teamId = Number(teamIdInput.value);
+      await loadInventoryForTeam(teamId);
+    });
+  }
 
-  itemForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    await createItemForCurrentTeam();
-  });
+  if (itemForm) {
+    itemForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      await createItemForCurrentTeam();
+    });
+  }
 
-  itemRegisterForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    await registerItemQuantity();
-  });
+  if (itemRegisterForm) {
+    itemRegisterForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      await registerItemQuantity();
+    });
+  }
 }
 
 async function loadTeams() {
@@ -113,7 +121,7 @@ async function loadTeams() {
     .order('id', { ascending: true });
 
   if (error) {
-    teamMessage.textContent = 'Falha ao carregar equipes.';
+        teamMessage.textContent = `Falha ao carregar equipes: ${error.message}`;
     return;
   }
 
@@ -182,7 +190,8 @@ async function createTeam() {
 
   const { error } = await supabase.from('teams').insert({ name1, name2, alt_team_id });
   if (error) {
-    teamMessage.textContent = 'Erro ao cadastrar equipe.';
+    console.error('Erro ao cadastrar equipe:', error);
+    teamMessage.textContent = `Erro ao cadastrar equipe: ${error.message}`;
     return;
   }
 
@@ -216,7 +225,10 @@ async function deleteTeam(teamId) {
     teamMessage.textContent = 'Falha ao excluir equipe.';
     return;
   }
-  await supabase.from('inventory_items').update({ removed: true }).eq('assigned_team_id', teamId);
+  const { error: invError } = await supabase.from('inventory_items').update({ removed: true }).eq('assigned_team_id', teamId);
+  if (invError) {
+    console.error('Erro ao marcar itens como removidos:', invError);
+  }
   await rebuildAltLinks();
   teamMessage.textContent = 'Equipe excluída com sucesso.';
   await loadTeams();
@@ -235,7 +247,10 @@ async function rebuildAltLinks() {
   });
 
   for (const item of updates) {
-    await supabase.from('teams').update({ alt_team_id: item.alt_team_id }).eq('id', item.id);
+    const { error: updateErr } = await supabase.from('teams').update({ alt_team_id: item.alt_team_id }).eq('id', item.id);
+    if (updateErr) {
+      console.error('Erro ao atualizar alt_team_id para', item.id, updateErr);
+    }
   }
 }
 
@@ -428,10 +443,16 @@ async function registerItemQuantity() {
 
   const item = state.selectedItem;
   if (foundQuantity === item.base_quantity) {
-    await supabase
+    const { data: resolvedData, error: resolvedError } = await supabase
       .from('inventory_items')
       .update({ resolved: true })
       .eq('id', item.id);
+    if (resolvedError) {
+      console.error('Erro ao marcar item como resolvido:', resolvedError);
+      registerMessage.textContent = 'Erro ao salvar a quantidade.';
+      return;
+    }
+    console.log('Item marcado como resolvido:', resolvedData);
     registerMessage.textContent = 'Quantidade correta salva. Item resolvido.';
   } else {
     const nextAttempts = item.attempts + 1;
@@ -443,7 +464,13 @@ async function registerItemQuantity() {
       assigned_team_id: targetTeamId,
       removed: shouldRemove,
     };
-    await supabase.from('inventory_items').update(updatePayload).eq('id', item.id);
+    const { data: updateData, error: updateErr } = await supabase.from('inventory_items').update(updatePayload).eq('id', item.id);
+    if (updateErr) {
+      console.error('Erro ao atualizar item após tentativa:', updateErr);
+      registerMessage.textContent = 'Erro ao registrar tentativa.';
+      return;
+    }
+    console.log('Item atualizado após tentativa:', updateData);
     if (shouldRemove) {
       registerMessage.textContent = 'O item foi removido após 4 tentativas incorretas.';
     } else {
