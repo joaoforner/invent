@@ -298,6 +298,20 @@ async function loadItemsForTeam(teamId) {
       master_item_id: r.master_item_id,
       _table: 'team_item_assignments',
     }));
+    // If we have master_item_ids, fetch extra master fields in batch
+    const masterIds = Array.from(new Set(data.map((i) => i.master_item_id).filter(Boolean)));
+    if (masterIds.length) {
+      const { data: masters, error: mastersErr } = await supabase
+        .from('master_inventory_items')
+        .select('id, material, pos_dpst, dep, desc_deposito')
+        .in('id', masterIds);
+      if (mastersErr) {
+        console.error('Erro ao buscar master_inventory_items:', mastersErr);
+      } else if (masters) {
+        const masterMap = Object.fromEntries(masters.map((m) => [m.id, m]));
+        data = data.map((i) => ({ ...i, ...(i.master_item_id ? masterMap[i.master_item_id] : {}) }));
+      }
+    }
   } catch (e) {
     // fallback to inventory_items table if view not present or fails
     const resp = await supabase
@@ -330,7 +344,7 @@ async function loadItemsForTeam(teamId) {
     card.className = 'item-card';
     card.innerHTML = `
       <p><strong>Item:</strong> ${item.name}</p>
-      <p><strong>Quantidade base:</strong> ${item.base_quantity}</p>
+      <!-- quantidade base ocultada por requisito -->
       <p><strong>Tentativas:</strong> ${item.attempts} / 4</p>
       <p><strong>Status:</strong> ${item.resolved ? 'Resolvido' : 'Aberto'}</p>
       <div class="actions">
@@ -373,8 +387,11 @@ async function createItemForCurrentTeam() {
 function selectItem(item) {
   state.selectedItem = item;
   selectedItemInfo.innerHTML = `
-    <p><strong>Item selecionado:</strong> ${item.name}</p>
-    <p><strong>Quantidade base:</strong> ${item.base_quantity}</p>
+    <p><strong>Item:</strong> ${item.name}</p>
+    <p><strong>Código material:</strong> ${item.material ?? '—'}</p>
+    <p><strong>Posição depósito:</strong> ${item.pos_dpst ?? '—'}</p>
+    <p><strong>Departamento:</strong> ${item.dep ?? '—'}</p>
+    <p><strong>Descrição depósito:</strong> ${item.desc_deposito ?? '—'}</p>
     <p><strong>Tentativas até agora:</strong> ${item.attempts}</p>
   `;
   itemFoundQtyInput.value = '';
