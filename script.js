@@ -343,8 +343,11 @@ async function loadItemsForTeam(teamId) {
     const card = document.createElement('article');
     card.className = 'item-card';
     card.innerHTML = `
+      <p><strong>Descrição:</strong> ${item.material ?? '—'}</p>
       <p><strong>Item:</strong> ${item.name}</p>
-      <!-- quantidade base ocultada por requisito -->
+      <p><strong>Prateleira:</strong> ${item.pos_dpst ?? '—'}</p>
+      <p><strong>Depósito:</strong> ${item.dep ?? '—'}</p>
+      <p><strong>Descrição do depósito:</strong> ${item.desc_deposito ?? '—'}</p>
       <p><strong>Tentativas:</strong> ${item.attempts} / 4</p>
       <p><strong>Status:</strong> ${item.resolved ? 'Resolvido' : 'Aberto'}</p>
       <div class="actions">
