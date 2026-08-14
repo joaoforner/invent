@@ -277,26 +277,54 @@ async function loadInventoryForTeam(teamId) {
 }
 
 async function loadItemsForTeam(teamId) {
-  const { data, error } = await supabase
-    .from('inventory_items')
-    .select('id, name, base_quantity, attempts, assigned_team_id, resolved, removed')
-    .eq('assigned_team_id', teamId)
-    .eq('removed', false)
-    .order('id', { ascending: true });
+  // Prefer the view that joins master items with assignments; fall back to inventory_items
+  let data = null;
+  let error = null;
+  try {
+    const viewResp = await supabase
+      .from('view_items_for_team')
+      .select('assignment_id, team_id, master_item_id, descricao, material, base_quantity, umb, found_quantity, attempts, resolved, removed')
+      .eq('team_id', teamId);
+    if (viewResp.error) throw viewResp.error;
+    // Map view rows to the shape expected by the UI and mark source as assignment
+    data = (viewResp.data || []).filter((r) => !r.removed).map((r) => ({
+      id: r.assignment_id,
+      name: r.descricao || r.material || `item-${r.master_item_id}`,
+      base_quantity: r.base_quantity,
+      attempts: r.attempts,
+      assigned_team_id: r.team_id,
+      resolved: r.resolved,
+      removed: r.removed,
+      master_item_id: r.master_item_id,
+      _table: 'team_item_assignments',
+    }));
+  } catch (e) {
+    // fallback to inventory_items table if view not present or fails
+    const resp = await supabase
+      .from('inventory_items')
+      .select('id, name, base_quantity, attempts, assigned_team_id, resolved, removed')
+      .eq('assigned_team_id', teamId)
+      .eq('removed', false)
+      .order('id', { ascending: true });
+    data = resp.data;
+    error = resp.error;
+  }
 
   if (error) {
     inventoryMessage.textContent = 'Erro ao carregar itens.';
+    console.error('loadItemsForTeam error:', error);
     return;
   }
 
-  inventoryItems.innerHTML = '';
+  if (inventoryItems) inventoryItems.innerHTML = '';
   if (!data || data.length === 0) {
-    inventoryItems.innerHTML = '<p>Nenhum item disponível para essa equipe.</p>';
+    if (inventoryItems) inventoryItems.innerHTML = '<p>Nenhum item disponível para essa equipe.</p>';
     inventoryListCard.classList.add('hidden');
     return;
   }
 
   inventoryListCard.classList.remove('hidden');
+  // Render items without edit option; items come from master data and must be unique
   data.forEach((item) => {
     const card = document.createElement('article');
     card.className = 'item-card';
@@ -307,12 +335,11 @@ async function loadItemsForTeam(teamId) {
       <p><strong>Status:</strong> ${item.resolved ? 'Resolvido' : 'Aberto'}</p>
       <div class="actions">
         <button class="small-btn success" data-action="select" data-id="${item.id}">Selecionar</button>
-        <button class="small-btn" data-action="edit" data-id="${item.id}">Editar</button>
       </div>
     `;
-    card.querySelector('[data-action="select"]').addEventListener('click', () => selectItem(item));
-    card.querySelector('[data-action="edit"]').addEventListener('click', () => renderItemEditForm(item, card));
-    inventoryItems.appendChild(card);
+    const selectBtn = card.querySelector('[data-action="select"]');
+    if (selectBtn) selectBtn.addEventListener('click', () => selectItem(item));
+    if (inventoryItems) inventoryItems.appendChild(card);
   });
 }
 
@@ -337,34 +364,10 @@ async function createItemForCurrentTeam() {
     inventoryMessage.textContent = 'Carregue uma equipe antes de criar itens.';
     return;
   }
-  // We no longer require entering the item name or base quantity via the UI.
-  // Keep the inputs and the original logic here as comments for reference.
-  // const name = itemNameInput.value.trim();
-  // const base_quantity = Number(itemBaseInput.value);
-  // if (!name || !base_quantity || base_quantity < 1) {
-  //   inventoryMessage.textContent = 'Preencha nome e quantidade base válida.';
-  //   return;
-  // }
-
-  const payload = {
-    team_id: state.currentTeam.id,
-    assigned_team_id: state.currentTeam.id,
-    // name: name, // intentionally omitted per new requirement
-    // base_quantity: base_quantity, // intentionally omitted per new requirement
-    attempts: 0,
-    resolved: false,
-    removed: false,
-  };
-
-  const { error } = await supabase.from('inventory_items').insert(payload);
-  if (error) {
-    inventoryMessage.textContent = 'Erro ao criar o item.';
-    return;
-  }
-  itemNameInput.value = '';
-  itemBaseInput.value = '';
-  inventoryMessage.textContent = 'Item cadastrado.';
-  await loadItemsForTeam(state.currentTeam.id);
+  // Items now come from the Supabase master data (team_item_assignments/view).
+  // Creation of items via UI is disabled to avoid duplicates.
+  inventoryMessage.textContent = 'Itens são carregados do banco (master); criação manual desabilitada.';
+  return;
 }
 
 function selectItem(item) {
@@ -440,34 +443,64 @@ async function registerItemQuantity() {
 
   const item = state.selectedItem;
   if (foundQuantity === item.base_quantity) {
-    const { data: resolvedData, error: resolvedError } = await supabase
-      .from('inventory_items')
-      .update({ resolved: true })
-      .eq('id', item.id);
-    if (resolvedError) {
-      console.error('Erro ao marcar item como resolvido:', resolvedError);
-      registerMessage.textContent = 'Erro ao salvar a quantidade.';
-      return;
+    if (item._table === 'team_item_assignments') {
+      const { data: resolvedData, error: resolvedError } = await supabase
+        .from('team_item_assignments')
+        .update({ resolved: true })
+        .eq('id', item.id);
+      if (resolvedError) {
+        console.error('Erro ao marcar assignment como resolvido:', resolvedError);
+        registerMessage.textContent = 'Erro ao salvar a quantidade.';
+        return;
+      }
+      console.log('Assignment marcado como resolvido:', resolvedData);
+      registerMessage.textContent = 'Quantidade correta salva. Item resolvido.';
+    } else {
+      const { data: resolvedData, error: resolvedError } = await supabase
+        .from('inventory_items')
+        .update({ resolved: true })
+        .eq('id', item.id);
+      if (resolvedError) {
+        console.error('Erro ao marcar item como resolvido:', resolvedError);
+        registerMessage.textContent = 'Erro ao salvar a quantidade.';
+        return;
+      }
+      console.log('Item marcado como resolvido:', resolvedData);
+      registerMessage.textContent = 'Quantidade correta salva. Item resolvido.';
     }
-    console.log('Item marcado como resolvido:', resolvedData);
-    registerMessage.textContent = 'Quantidade correta salva. Item resolvido.';
   } else {
     const nextAttempts = item.attempts + 1;
     const shouldRemove = nextAttempts >= 4;
     const targetTeamId = shouldRemove ? item.assigned_team_id : state.currentTeam.alt_team_id || item.assigned_team_id;
 
-    const updatePayload = {
-      attempts: nextAttempts,
-      assigned_team_id: targetTeamId,
-      removed: shouldRemove,
-    };
-    const { data: updateData, error: updateErr } = await supabase.from('inventory_items').update(updatePayload).eq('id', item.id);
-    if (updateErr) {
-      console.error('Erro ao atualizar item após tentativa:', updateErr);
-      registerMessage.textContent = 'Erro ao registrar tentativa.';
-      return;
+    if (item._table === 'team_item_assignments') {
+      // For assignments the team column is `team_id` and we update that
+      const updatePayload = {
+        attempts: nextAttempts,
+        team_id: shouldRemove ? item.assigned_team_id : (state.currentTeam.alt_team_id || item.assigned_team_id),
+        removed: shouldRemove,
+      };
+      const { data: updateData, error: updateErr } = await supabase.from('team_item_assignments').update(updatePayload).eq('id', item.id);
+      if (updateErr) {
+        console.error('Erro ao atualizar assignment após tentativa:', updateErr);
+        registerMessage.textContent = 'Erro ao registrar tentativa.';
+        return;
+      }
+      console.log('Assignment atualizado após tentativa:', updateData);
+    } else {
+      const updatePayload = {
+        attempts: nextAttempts,
+        assigned_team_id: targetTeamId,
+        removed: shouldRemove,
+      };
+      const { data: updateData, error: updateErr } = await supabase.from('inventory_items').update(updatePayload).eq('id', item.id);
+      if (updateErr) {
+        console.error('Erro ao atualizar item após tentativa:', updateErr);
+        registerMessage.textContent = 'Erro ao registrar tentativa.';
+        return;
+      }
+      console.log('Item atualizado após tentativa:', updateData);
     }
-    console.log('Item atualizado após tentativa:', updateData);
     if (shouldRemove) {
       registerMessage.textContent = 'O item foi removido após 4 tentativas incorretas.';
     } else {
