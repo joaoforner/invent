@@ -5,7 +5,7 @@
   <!-- Define codificação, responsividade, título e arquivo de estilos. -->
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>App de Inventário</title>
+  <title>Menu principal</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -13,8 +13,7 @@
   <div class="app-shell">
     <!-- Cabeçalho com o nome e a descrição resumida do sistema. -->
     <header class="app-header">
-      <h1>App de Inventário</h1>
-      <p>Menu principal com Equipe e Inventário</p>
+      <p class="app-kicker">MENU PRINCIPAL</p>
     </header>
 
     <!-- Menu principal para alternar entre início, equipes e inventário. -->
@@ -28,50 +27,135 @@
     <main class="page-content">
       <!-- Tela inicial com atalhos para as duas áreas principais. -->
       <section id="home-page" class="page-section active">
-        <div class="card">
-          <h2>Bem-vindo</h2>
-          <p>Use o menu para gerenciar equipes e itens de inventário.</p>
-          <div class="home-actions">
-            <button id="goto-team" class="primary">Ir para Equipe</button>
-            <button id="goto-inventory" class="primary">Ir para Inventário</button>
+        <div class="home-hero">
+          <div class="home-hero-content">
+            <p class="eyebrow">CENTRAL DE CONTROLE</p>
+            <h2>Inventário em ordem,<br /><span>decisões mais rápidas.</span></h2>
+            <p class="home-lead">Organize as equipes, acompanhe os itens e registre as contagens em um único espaço de trabalho.</p>
+            <div class="home-actions">
+              <button id="goto-inventory" class="primary home-action-main">
+                <span class="action-icon">→</span>
+                <span><strong>Acessar inventário</strong><small>Registrar contagens</small></span>
+              </button>
+              <button id="goto-team" class="secondary home-action-secondary">
+                <span class="action-icon">+</span>
+                <span><strong>Gerenciar equipes</strong><small>Cadastrar ou editar</small></span>
+              </button>
+            </div>
+          </div>
+          <div class="home-hero-mark" aria-hidden="true">
+            <div class="mark-ring mark-ring-outer"></div>
+            <div class="mark-ring mark-ring-inner"></div>
+            <div class="mark-core">IN<br /><small>01</small></div>
+            <span class="mark-label mark-label-top">CONTROLE</span>
+            <span class="mark-label mark-label-bottom">PRECISÃO</span>
+          </div>
+        </div>
+
+        <div class="home-overview">
+          <div class="overview-heading">
+            <p class="eyebrow">VISÃO GERAL</p>
+            <h3>Um fluxo simples para a operação diária</h3>
+          </div>
+          <div class="workflow-list">
+            <div class="workflow-step">
+              <span class="step-number">01</span>
+              <div><strong>Equipe</strong><p>Defina quem realiza a conferência.</p></div>
+            </div>
+            <div class="workflow-line"></div>
+            <div class="workflow-step">
+              <span class="step-number">02</span>
+              <div><strong>Inventário</strong><p>Carregue os itens da equipe.</p></div>
+            </div>
+            <div class="workflow-line"></div>
+            <div class="workflow-step">
+              <span class="step-number">03</span>
+              <div><strong>Contagem</strong><p>Registre o resultado encontrado.</p></div>
+            </div>
           </div>
         </div>
       </section>
 
       <!-- Tela de cadastro, edição, exclusão e listagem de equipes. -->
       <section id="team-page" class="page-section">
-        <div class="card">
-          <h2>Registro de Equipes</h2>
-          <form id="team-form" class="form-grid">
-            <label>
-              Nome da primeira pessoa
-              <input type="text" id="team-name1" placeholder="Nome 1" required />
-            </label>
-            <label>
-              Nome da segunda pessoa
-              <input type="text" id="team-name2" placeholder="Nome 2" required />
-            </label>
-            <button type="submit" class="primary">Cadastrar equipe</button>
-          </form>
-          <div id="team-message" class="message"></div>
+        <div class="section-intro">
+          <div>
+            <p class="eyebrow">CONFIGURAÇÃO</p>
+            <h2>Registro de equipes</h2>
+            <p>Cadastre as duplas responsáveis pela conferência do inventário.</p>
+          </div>
+          <span class="section-badge">EQUIPES</span>
         </div>
 
-        <div class="card">
-          <h3>Equipes cadastradas</h3>
+        <div class="team-layout">
+          <div class="card team-form-card">
+            <div class="card-heading">
+              <span class="card-index">01</span>
+              <div>
+                <h3>Nova equipe</h3>
+                <p>Informe os dois integrantes da equipe.</p>
+              </div>
+            </div>
+            <form id="team-form" class="form-grid">
+              <label>
+                Primeiro integrante
+                <input type="text" id="team-name1" placeholder="Ex.: Ana Souza" required />
+              </label>
+              <label>
+                Segundo integrante
+                <input type="text" id="team-name2" placeholder="Ex.: Carlos Lima" required />
+              </label>
+              <button type="submit" class="primary">Cadastrar equipe <span aria-hidden="true">→</span></button>
+            </form>
+            <div id="team-message" class="message"></div>
+          </div>
+
+          <div class="team-guidance">
+            <span class="guidance-mark">i</span>
+            <div>
+              <strong>Como funciona</strong>
+              <p>Depois do cadastro, os itens são distribuídos entre as equipes. Uma equipe alternativa será definida automaticamente.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card team-list-card">
+          <div class="card-heading list-heading">
+            <div>
+              <p class="eyebrow">ACOMPANHAMENTO</p>
+              <h3>Equipes cadastradas</h3>
+            </div>
+            <span class="list-caption">Edite ou remova uma equipe</span>
+          </div>
           <div id="team-list" class="list-grid"></div>
         </div>
       </section>
 
       <!-- Tela para carregar uma equipe, listar seus itens e registrar quantidades. -->
       <section id="inventory-page" class="page-section">
-        <div class="card">
-          <h2>Inventário da equipe</h2>
-          <form id="inventory-team-form" class="form-grid">
+        <div class="section-intro inventory-intro">
+          <div>
+            <p class="eyebrow">CONFERÊNCIA</p>
+            <h2>Inventário da equipe</h2>
+            <p>Carregue uma equipe para consultar os itens e registrar as quantidades encontradas.</p>
+          </div>
+          <span class="section-badge">INVENTÁRIO</span>
+        </div>
+
+        <div class="inventory-loader card">
+          <div class="card-heading">
+            <span class="card-index">01</span>
+            <div>
+              <h3>Selecionar equipe</h3>
+              <p>Informe o ID da equipe responsável pela conferência.</p>
+            </div>
+          </div>
+          <form id="inventory-team-form" class="inventory-load-form">
             <label>
               ID da equipe
-              <input type="number" id="inventory-team-id" placeholder="Digite o ID" required min="1" />
+              <input type="number" id="inventory-team-id" placeholder="Ex.: 1" required min="1" />
             </label>
-            <button type="submit" class="primary">Carregar equipe</button>
+            <button type="submit" class="primary">Carregar equipe <span aria-hidden="true">→</span></button>
           </form>
           <div id="inventory-team-info" class="team-info"></div>
           <div id="inventory-message" class="message"></div>
@@ -98,14 +182,26 @@
         </div>
 
         <!-- Lista preenchida dinamicamente com os itens vindos do Supabase. -->
-        <div class="card hidden" id="inventory-list-card">
-          <h3>Itens da equipe</h3>
+        <div class="card hidden inventory-list-card" id="inventory-list-card">
+          <div class="card-heading list-heading">
+            <div>
+              <p class="eyebrow">ITENS ATRIBUÍDOS</p>
+              <h3>Itens para conferência</h3>
+            </div>
+            <span class="list-caption">Selecione um item para informar a quantidade</span>
+          </div>
           <div id="inventory-items" class="list-grid"></div>
         </div>
 
         <!-- Formulário que aparece depois que o usuário seleciona um item. -->
-        <div class="card hidden" id="selected-item-card">
-          <h3>Registro de quantidade</h3>
+        <div class="card hidden selected-item-card" id="selected-item-card">
+          <div class="card-heading">
+            <span class="card-index">02</span>
+            <div>
+              <h3>Registrar quantidade</h3>
+              <p>Informe o total encontrado fisicamente para o item selecionado.</p>
+            </div>
+          </div>
           <div id="selected-item-info"></div>
           <form id="item-register-form" class="form-grid">
             <label>
