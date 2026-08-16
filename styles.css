@@ -1,4 +1,5 @@
 :root {
+  /* Variáveis globais de aparência e cores base do tema escuro. */
   color-scheme: dark;
   font-family: Inter, "Segoe UI", sans-serif;
   background: #0f172a;
@@ -6,10 +7,12 @@
 }
 
 * {
+  /* Faz largura e altura incluírem bordas e preenchimentos. */
   box-sizing: border-box;
 }
 
 body {
+  /* Centraliza o app e cria o fundo atmosférico da página. */
   margin: 0;
   min-height: 100vh;
   display: flex;
@@ -19,10 +22,12 @@ body {
 }
 
 .app-shell {
+  /* Limita a largura do conteúdo sem impedir a adaptação em telas menores. */
   width: min(1200px, 100%);
 }
 
 .app-header {
+  /* Estiliza o cabeçalho principal com espaçamento, fundo e sombra. */
   padding: 20px 24px;
   border-radius: 24px;
   background: rgba(15, 23, 42, 0.95);
@@ -31,16 +36,19 @@ body {
 }
 
 .app-header h1 {
+  /* Controla margem e tamanho responsivo do título. */
   margin: 0 0 8px;
   font-size: clamp(2rem, 3vw, 2.6rem);
 }
 
 .app-header p {
+  /* Exibe o subtítulo com menor contraste visual. */
   margin: 0;
   color: #94a3b8;
 }
 
 .menu-buttons {
+  /* Organiza os botões do menu em uma linha que pode quebrar. */
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
@@ -49,6 +57,7 @@ body {
 
 .nav-btn,
 .primary {
+  /* Aparência e comportamento compartilhados pelos botões principais. */
   border: none;
   border-radius: 12px;
   padding: 14px 20px;
@@ -58,6 +67,7 @@ body {
 }
 
 .nav-btn {
+  /* Cor padrão dos botões de navegação. */
   background: #1e293b;
   color: #e2e8f0;
 }
@@ -69,24 +79,29 @@ body {
 }
 
 .primary {
+  /* Destaca ações principais com a cor azul. */
   background: #2563eb;
   color: white;
 }
 
 .page-content {
+  /* Cria espaçamento entre os blocos de conteúdo. */
   display: grid;
   gap: 20px;
 }
 
 .page-section {
+  /* Esconde seções inativas. */
   display: none;
 }
 
 .page-section.active {
+  /* Mostra a seção escolhida pelo JavaScript. */
   display: block;
 }
 
 .card {
+  /* Cria painéis visuais para agrupar formulários e listas. */
   background: rgba(15, 23, 42, 0.92);
   padding: 24px;
   border-radius: 24px;
@@ -99,11 +114,13 @@ body {
 }
 
 .form-grid {
+  /* Empilha os campos dos formulários com espaçamento uniforme. */
   display: grid;
   gap: 16px;
 }
 
 .form-grid label {
+  /* Organiza cada rótulo junto do seu campo de entrada. */
   display: grid;
   gap: 8px;
   color: #cbd5e1;
@@ -111,6 +128,7 @@ body {
 
 input[type="text"],
 input[type="number"] {
+  /* Estilo comum dos campos de texto e número. */
   width: 100%;
   padding: 12px 14px;
   border-radius: 14px;
@@ -126,12 +144,14 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .list-grid {
+  /* Empilha cards de equipes ou itens. */
   display: grid;
   gap: 14px;
 }
 
 .team-card,
 .item-card {
+  /* Aparência dos cards criados dinamicamente pelo JavaScript. */
   border: 1px solid rgba(148, 163, 184, 0.16);
   padding: 18px;
   border-radius: 18px;
@@ -154,6 +174,7 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .small-btn {
+  /* Estilo dos botões menores dentro dos cards. */
   background: #334155;
   color: #e2e8f0;
   padding: 10px 14px;
@@ -163,18 +184,22 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .small-btn.danger {
+  /* Indica uma ação destrutiva, como excluir. */
   background: #dc2626;
 }
 
 .small-btn.success {
+  /* Indica uma ação positiva, como editar ou selecionar. */
   background: #16a34a;
 }
 
 .hidden {
+  /* Classe usada pelo JavaScript para esconder elementos. */
   display: none;
 }
 
 .message {
+  /* Área reservada para mensagens de sucesso, erro ou orientação. */
   padding: 12px 16px;
   border-radius: 14px;
   background: rgba(56, 189, 248, 0.12);
@@ -182,6 +207,7 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .team-info {
+  /* Painel que mostra a equipe carregada no inventário. */
   padding: 16px;
   border-radius: 16px;
   background: rgba(15, 23, 42, 0.9);
@@ -190,6 +216,7 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 @media (min-width: 800px) {
+  /* Mantém o conteúdo em uma coluna também em telas maiores. */
   .page-content {
     grid-template-columns: 1fr;
   }

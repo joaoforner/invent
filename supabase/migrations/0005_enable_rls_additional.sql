@@ -1,6 +1,6 @@
--- Enable Row Level Security for master and assignment/count tables
+-- Ativa RLS nas tabelas do cadastro mestre, atribuições e histórico de contagens.
 
--- master_inventory_items
+-- Políticas da tabela de materiais mestres.
 alter table public.master_inventory_items enable row level security;
 
 create policy "Allow read master_inventory_items"
@@ -28,7 +28,7 @@ create policy "Allow delete master_inventory_items"
   to public
   using (true);
 
--- team_item_assignments
+-- Políticas da tabela de atribuições atuais.
 alter table public.team_item_assignments enable row level security;
 
 create policy "Allow read team_item_assignments"
@@ -56,7 +56,7 @@ create policy "Allow delete team_item_assignments"
   to public
   using (true);
 
--- team_item_counts
+-- Políticas da tabela de histórico de contagens.
 alter table public.team_item_counts enable row level security;
 
 create policy "Allow read team_item_counts"
@@ -84,4 +84,4 @@ create policy "Allow delete team_item_counts"
   to public
   using (true);
 
--- End of migration
+-- Fim da migration de segurança das tabelas adicionais.

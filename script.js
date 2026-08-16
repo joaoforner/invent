@@ -1,30 +1,38 @@
+// Importa a biblioteca do Supabase para fazer requisições ao banco de dados
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
+// URL e chave de acesso do banco de dados Supabase
 const SUPABASE_URL = 'https://qgsrmagejwxmsvpqckvu.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_ErzcEbUVmgapel5XRrrKAw_vpVzr_KH';
+// Cria cliente Supabase para comunicar com o banco de dados
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// Estado global do app: guarda a equipe atual e o item selecionado
 const state = {
-  currentTeam: null,
-  selectedItem: null,
+  currentTeam: null,  // Equipe carregada atualmente
+  selectedItem: null, // Item do inventário selecionado para registrar quantidade
 };
 
+// Referências aos elementos HTML das seções (páginas) do app
 const sections = {
-  home: document.getElementById('home-page'),
-  team: document.getElementById('team-page'),
-  inventory: document.getElementById('inventory-page'),
+  home: document.getElementById('home-page'),      // Página inicial
+  team: document.getElementById('team-page'),      // Página de gerenciar equipes
+  inventory: document.getElementById('inventory-page'), // Página de inventário
 };
 
+// Botões de navegação no menu
 const navButtons = {
   home: document.getElementById('btn-home'),
   team: document.getElementById('btn-team'),
   inventory: document.getElementById('btn-inventory'),
 };
 
+// Elementos de formulário e lista de equipes
 const teamForm = document.getElementById('team-form');
 const teamList = document.getElementById('team-list');
 const teamMessage = document.getElementById('team-message');
 
+// Elementos da seção de inventário (carregar equipe, listar itens, registrar quantidade)
 const inventoryTeamForm = document.getElementById('inventory-team-form');
 const inventoryTeamInfo = document.getElementById('inventory-team-info');
 const inventoryMessage = document.getElementById('inventory-message');
@@ -37,9 +45,11 @@ const registerMessage = document.getElementById('register-message');
 const itemForm = document.getElementById('item-form');
 const itemRegisterForm = document.getElementById('item-register-form');
 
+// Botões de navegação rápida entre páginas
 const gotoTeam = document.getElementById('goto-team');
 const gotoInventory = document.getElementById('goto-inventory');
 
+// Campos de entrada de formulários
 const teamName1Input = document.getElementById('team-name1');
 const teamName2Input = document.getElementById('team-name2');
 const teamIdInput = document.getElementById('inventory-team-id');
@@ -47,12 +57,14 @@ const itemNameInput = document.getElementById('item-name');
 const itemBaseInput = document.getElementById('item-base');
 const itemFoundQtyInput = document.getElementById('item-found-qty');
 
+// Inicializa o app: configura navegação, formulários e carrega a lista de equipes
 async function init() {
   attachNavigation();
   attachForms();
   await loadTeams();
 }
 
+// Configura os listeners dos botões de navegação entre páginas
 function attachNavigation() {
   const buttons = [
     { button: navButtons.home, section: 'home' },
@@ -60,51 +72,64 @@ function attachNavigation() {
     { button: navButtons.inventory, section: 'inventory' },
   ];
 
+  // Adiciona clique nos botões do menu para trocar de página
   buttons.forEach(({ button, section }) => {
     button.addEventListener('click', () => showSection(section));
   });
+  // Botões de atalho nas páginas home
   gotoTeam.addEventListener('click', () => showSection('team'));
   gotoInventory.addEventListener('click', () => showSection('inventory'));
 }
 
+// Mostra a seção (página) selecionada e esconde as outras
 function showSection(sectionKey) {
+  // Ativa/desativa classes CSS nas seções para mostrar/ocultar
   Object.entries(sections).forEach(([key, element]) => {
     element.classList.toggle('active', key === sectionKey);
   });
+  // Marca o botão de navegação como ativo
   Object.entries(navButtons).forEach(([key, button]) => {
     button.classList.toggle('active', key === sectionKey);
   });
+  // Se ir para equipe, recarrega a lista de equipes
   if (sectionKey === 'team') {
     loadTeams();
   }
+  // Se ir para inventário, limpa os dados da equipe anterior
   if (sectionKey === 'inventory') {
     clearInventoryView();
   }
 }
 
+// Configura os listeners dos formulários do app
 function attachForms() {
+  // Formulário de criar equipe
   teamForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     await createTeam();
   });
 
+  // Formulário de carregar inventário de uma equipe
   inventoryTeamForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     const teamId = Number(teamIdInput.value);
     await loadInventoryForTeam(teamId);
   });
 
+  // Formulário de criar item (desabilitado)
   itemForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     await createItemForCurrentTeam();
   });
 
+  // Formulário de registrar a quantidade encontrada de um item
   itemRegisterForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     await registerItemQuantity();
   });
 }
 
+// Busca as equipes no Supabase e cria os cards exibidos na tela.
 async function loadTeams() {
   teamMessage.textContent = '';
   const { data, error } = await supabase
@@ -143,6 +168,7 @@ async function loadTeams() {
   });
 }
 
+// Substitui o card de uma equipe por campos para editar seus nomes.
 function renderTeamEditForm(team, container) {
   container.innerHTML = `
     <div class="form-grid">
@@ -168,6 +194,7 @@ function renderTeamEditForm(team, container) {
   container.querySelector(`#cancel-team-${team.id}`).addEventListener('click', () => loadTeams());
 }
 
+// Valida os nomes, cadastra uma nova equipe e reorganiza os links alternativos.
 async function createTeam() {
   const name1 = teamName1Input.value.trim();
   const name2 = teamName2Input.value.trim();
@@ -176,9 +203,17 @@ async function createTeam() {
     return;
   }
 
-  const { data: existingTeams } = await supabase.from('teams').select('id');
-  const otherTeamIds = existingTeams?.map((team) => team.id) ?? [];
-  const alt_team_id = otherTeamIds.length ? otherTeamIds[Math.floor(Math.random() * otherTeamIds.length)] : null;
+  const { data: existingTeams, error: listError } = await supabase.from('teams').select('id');
+  if (listError) {
+    console.error('Erro ao consultar equipes:', listError);
+    teamMessage.textContent = `Erro ao consultar equipes: ${listError.message}`;
+    return;
+  }
+
+  const otherTeamIds = (existingTeams || []).map((team) => team.id);
+  const alt_team_id = otherTeamIds.length > 0
+    ? otherTeamIds[Math.floor(Math.random() * otherTeamIds.length)]
+    : null;
 
   const { error } = await supabase.from('teams').insert({ name1, name2, alt_team_id });
   if (error) {
@@ -194,6 +229,7 @@ async function createTeam() {
   await loadTeams();
 }
 
+// Atualiza os nomes de uma equipe existente no banco e recarrega a lista.
 async function updateTeam(teamId, name1, name2) {
   if (!name1 || !name2) {
     teamMessage.textContent = 'Os nomes não podem ficar em branco.';
@@ -208,6 +244,7 @@ async function updateTeam(teamId, name1, name2) {
   await loadTeams();
 }
 
+// Confirma e exclui uma equipe, marcando itens legados relacionados como removidos.
 async function deleteTeam(teamId) {
   if (!confirm('Deseja realmente excluir esta equipe?')) {
     return;
@@ -226,6 +263,7 @@ async function deleteTeam(teamId) {
   await loadTeams();
 }
 
+// Escolhe aleatoriamente uma equipe alternativa para cada equipe cadastrada.
 async function rebuildAltLinks() {
   const { data: teams } = await supabase.from('teams').select('id');
   if (!teams || teams.length === 0) return;
@@ -246,6 +284,7 @@ async function rebuildAltLinks() {
   }
 }
 
+// Busca uma equipe pelo ID, atualiza seu resumo e carrega os itens atribuídos.
 async function loadInventoryForTeam(teamId) {
   inventoryMessage.textContent = '';
   registerMessage.textContent = '';
@@ -276,8 +315,9 @@ async function loadInventoryForTeam(teamId) {
   await loadItemsForTeam(teamId);
 }
 
+// Carrega os itens pela view principal e usa a tabela legada como fallback.
 async function loadItemsForTeam(teamId) {
-  // Prefer the view that joins master items with assignments; fall back to inventory_items
+  // Dá preferência à view que une materiais mestres e atribuições; usa inventory_items como fallback.
   let data = null;
   let error = null;
   try {
@@ -286,8 +326,8 @@ async function loadItemsForTeam(teamId) {
       .select('assignment_id, team_id, master_item_id, descricao, material, base_quantity, umb, found_quantity, attempts, resolved, removed')
       .eq('team_id', teamId);
     if (viewResp.error) throw viewResp.error;
-    // Map view rows to the shape expected by the UI and mark source as assignment
-    data = (viewResp.data || []).filter((r) => !r.removed).map((r) => ({
+    // Converte as linhas da view para o formato esperado pela interface.
+    data = (viewResp.data || []).filter((r) => !r.removed && !r.resolved).map((r) => ({
       id: r.assignment_id,
       name: r.descricao || r.material || `item-${r.master_item_id}`,
       base_quantity: r.base_quantity,
@@ -298,7 +338,7 @@ async function loadItemsForTeam(teamId) {
       master_item_id: r.master_item_id,
       _table: 'team_item_assignments',
     }));
-    // If we have master_item_ids, fetch extra master fields in batch
+    // Busca em lote os campos adicionais dos materiais mestres, quando existirem IDs.
     const masterIds = Array.from(new Set(data.map((i) => i.master_item_id).filter(Boolean)));
     if (masterIds.length) {
       const { data: masters, error: mastersErr } = await supabase
@@ -313,7 +353,7 @@ async function loadItemsForTeam(teamId) {
       }
     }
   } catch (e) {
-    // fallback to inventory_items table if view not present or fails
+    // Usa a tabela inventory_items se a view não existir ou apresentar erro.
     const resp = await supabase
       .from('inventory_items')
       .select('id, name, base_quantity, attempts, assigned_team_id, resolved, removed')
@@ -338,7 +378,7 @@ async function loadItemsForTeam(teamId) {
   }
 
   inventoryListCard.classList.remove('hidden');
-  // Render items without edit option; items come from master data and must be unique
+  // Renderiza os itens sem edição; eles vêm do cadastro mestre e devem ser únicos.
   data.forEach((item) => {
     const card = document.createElement('article');
     card.className = 'item-card';
@@ -360,33 +400,36 @@ async function loadItemsForTeam(teamId) {
   });
 }
 
+// Limpa a tela e o estado do inventário ao entrar nessa seção novamente.
 function clearInventoryView() {
-  inventoryTeamInfo.textContent = '';
-  inventoryMessage.textContent = '';
-  registerMessage.textContent = '';
-  inventoryCreateCard.classList.add('hidden');
-  inventoryListCard.classList.add('hidden');
-  selectedItemCard.classList.add('hidden');
-  inventoryItems.innerHTML = '';
-  teamIdInput.value = '';
-  itemNameInput.value = '';
-  itemBaseInput.value = '';
-  itemFoundQtyInput.value = '';
+  if (inventoryTeamInfo) inventoryTeamInfo.textContent = '';
+  if (inventoryMessage) inventoryMessage.textContent = '';
+  if (registerMessage) registerMessage.textContent = '';
+  if (inventoryCreateCard) inventoryCreateCard.classList.add('hidden');
+  if (inventoryListCard) inventoryListCard.classList.add('hidden');
+  if (selectedItemCard) selectedItemCard.classList.add('hidden');
+  if (inventoryItems) inventoryItems.innerHTML = '';
+  if (teamIdInput) teamIdInput.value = '';
+  if (itemNameInput) itemNameInput.value = '';
+  if (itemBaseInput) itemBaseInput.value = '';
+  if (itemFoundQtyInput) itemFoundQtyInput.value = '';
   state.currentTeam = null;
   state.selectedItem = null;
 }
 
+// Informa que a criação manual está desativada porque os itens vêm do cadastro mestre.
 async function createItemForCurrentTeam() {
   if (!state.currentTeam) {
     inventoryMessage.textContent = 'Carregue uma equipe antes de criar itens.';
     return;
   }
-  // Items now come from the Supabase master data (team_item_assignments/view).
-  // Creation of items via UI is disabled to avoid duplicates.
+  // Os itens vêm do cadastro mestre do Supabase pela view de atribuições.
+  // A criação pela interface fica desativada para evitar duplicidades.
   inventoryMessage.textContent = 'Itens são carregados do banco (master); criação manual desabilitada.';
   return;
 }
 
+// Guarda o item escolhido e mostra seus dados no formulário de quantidade.
 function selectItem(item) {
   state.selectedItem = item;
   selectedItemInfo.innerHTML = `
@@ -397,11 +440,20 @@ function selectItem(item) {
     <p><strong>Descrição depósito:</strong> ${item.desc_deposito ?? '—'}</p>
     <p><strong>Tentativas até agora:</strong> ${item.attempts}</p>
   `;
-  itemFoundQtyInput.value = '';
-  selectedItemCard.classList.remove('hidden');
-  registerMessage.textContent = '';
+  if (itemFoundQtyInput) itemFoundQtyInput.value = '';
+  if (selectedItemCard) selectedItemCard.classList.remove('hidden');
+  if (registerMessage) registerMessage.textContent = '';
+
+  // Leva o formulário para a área visível e deixa o campo pronto para digitação.
+  if (selectedItemCard) {
+    selectedItemCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  if (itemFoundQtyInput) {
+    window.setTimeout(() => itemFoundQtyInput.focus(), 350);
+  }
 }
 
+// Monta o formulário antigo de edição de item, mantido para compatibilidade.
 function renderItemEditForm(item, container) {
   container.innerHTML = `
     <div class="form-grid">
@@ -431,6 +483,7 @@ function renderItemEditForm(item, container) {
   });
 }
 
+// Atualiza nome e quantidade base de um item da tabela legada.
 async function updateItem(itemId, name, base_quantity) {
   if (!name || !base_quantity || base_quantity < 1) {
     inventoryMessage.textContent = 'Nome e quantidade base devem ser válidos.';
@@ -450,89 +503,183 @@ async function updateItem(itemId, name, base_quantity) {
   }
 }
 
+// Registra a quantidade encontrada sem alterar a equipe atual do item.
 async function registerItemQuantity() {
   if (!state.selectedItem || !state.currentTeam) {
-    registerMessage.textContent = 'Selecione um item e equipe primeiro.';
+    if (registerMessage) registerMessage.textContent = 'Selecione um item e equipe primeiro.';
     return;
   }
-  const foundQuantity = Number(itemFoundQtyInput.value);
-  if (Number.isNaN(foundQuantity)) {
-    registerMessage.textContent = 'Informe uma quantidade válida.';
+
+  const enteredQuantity = Number(itemFoundQtyInput ? itemFoundQtyInput.value : NaN);
+  if (Number.isNaN(enteredQuantity)) {
+    if (registerMessage) registerMessage.textContent = 'Informe uma quantidade válida.';
     return;
   }
 
   const item = state.selectedItem;
-  if (foundQuantity === item.base_quantity) {
-    if (item._table === 'team_item_assignments') {
-      const { data: resolvedData, error: resolvedError } = await supabase
+  const baseQuantity = Number(item.base_quantity ?? 0);
+
+  if (item._table === 'team_item_assignments') {
+    // A redistribuição pode recriar as atribuições enquanto a tela está aberta.
+    // Por isso, confirma o ID atual usando o item mestre e a equipe carregada.
+    let assignmentId = item.id;
+    let currentAttempt = Number(item.attempts ?? 0);
+    const { data: currentAssignment } = await supabase
+      .from('team_item_assignments')
+      .select('id, attempts, found_quantity')
+      .eq('id', item.id)
+      .eq('team_id', state.currentTeam.id)
+      .maybeSingle();
+
+    if (currentAssignment) {
+      assignmentId = currentAssignment.id;
+      currentAttempt = Number(currentAssignment.attempts ?? 0);
+    } else if (item.master_item_id) {
+      const { data: assignmentByMaster } = await supabase
         .from('team_item_assignments')
-        .update({ resolved: true })
-        .eq('id', item.id);
-      if (resolvedError) {
-        console.error('Erro ao marcar assignment como resolvido:', resolvedError);
-        registerMessage.textContent = 'Erro ao salvar a quantidade.';
-        return;
-      }
-      console.log('Assignment marcado como resolvido:', resolvedData);
-      registerMessage.textContent = 'Quantidade correta salva. Item resolvido.';
-    } else {
-      const { data: resolvedData, error: resolvedError } = await supabase
-        .from('inventory_items')
-        .update({ resolved: true })
-        .eq('id', item.id);
-      if (resolvedError) {
-        console.error('Erro ao marcar item como resolvido:', resolvedError);
-        registerMessage.textContent = 'Erro ao salvar a quantidade.';
-        return;
-      }
-      console.log('Item marcado como resolvido:', resolvedData);
-      registerMessage.textContent = 'Quantidade correta salva. Item resolvido.';
-    }
-  } else {
-    const nextAttempts = item.attempts + 1;
-    const shouldRemove = nextAttempts >= 4;
-    const targetTeamId = shouldRemove ? item.assigned_team_id : state.currentTeam.alt_team_id || item.assigned_team_id;
+        .select('id, attempts, found_quantity')
+        .eq('master_item_id', item.master_item_id)
+        .eq('team_id', state.currentTeam.id)
+        .maybeSingle();
 
-    if (item._table === 'team_item_assignments') {
-      // For assignments the team column is `team_id` and we update that
-      const updatePayload = {
-        attempts: nextAttempts,
-        team_id: shouldRemove ? item.assigned_team_id : (state.currentTeam.alt_team_id || item.assigned_team_id),
-        removed: shouldRemove,
-      };
-      const { data: updateData, error: updateErr } = await supabase.from('team_item_assignments').update(updatePayload).eq('id', item.id);
-      if (updateErr) {
-        console.error('Erro ao atualizar assignment após tentativa:', updateErr);
-        registerMessage.textContent = 'Erro ao registrar tentativa.';
+      if (assignmentByMaster) {
+        assignmentId = assignmentByMaster.id;
+        currentAttempt = Number(assignmentByMaster.attempts ?? 0);
+      } else {
+        registerMessage.textContent = 'A atribuição deste item mudou. Recarregue a equipe e tente novamente.';
+        await loadItemsForTeam(state.currentTeam.id);
         return;
       }
-      console.log('Assignment atualizado após tentativa:', updateData);
-    } else {
-      const updatePayload = {
-        attempts: nextAttempts,
-        assigned_team_id: targetTeamId,
-        removed: shouldRemove,
-      };
-      const { data: updateData, error: updateErr } = await supabase.from('inventory_items').update(updatePayload).eq('id', item.id);
-      if (updateErr) {
-        console.error('Erro ao atualizar item após tentativa:', updateErr);
-        registerMessage.textContent = 'Erro ao registrar tentativa.';
-        return;
-      }
-      console.log('Item atualizado após tentativa:', updateData);
     }
-    if (shouldRemove) {
+
+    const { error } = await supabase
+      .from('team_item_assignments')
+      .update({ found_quantity: enteredQuantity })
+      .eq('id', assignmentId);
+
+    if (error) {
+      console.error('Erro ao registrar quantidade do item:', error);
+      registerMessage.textContent = `Erro ao registrar a quantidade: ${error.message}`;
+      return;
+    }
+
+    // Consulta novamente a atribuição para capturar a equipe após a execução do trigger.
+    let assignmentData = null;
+    let fetchErr = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const response = await supabase
+        .from('team_item_assignments')
+        .select('team_id, resolved, removed, attempts, found_quantity')
+        .eq('id', assignmentId)
+        .single();
+
+      assignmentData = response.data;
+      fetchErr = response.error;
+
+      if (!fetchErr && assignmentData) {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+
+    if (fetchErr) {
+      console.error('Erro ao buscar item atualizado:', fetchErr);
+    }
+
+    if (!assignmentData || Number(assignmentData.attempts ?? 0) <= currentAttempt) {
+      // Fallback para projetos em que a migration do trigger ainda não foi aplicada.
+      const nextAttempt = currentAttempt + 1;
+      const { error: countError } = await supabase
+        .from('team_item_counts')
+        .insert({
+          assignment_id: assignmentId,
+          master_item_id: item.master_item_id,
+          team_id: state.currentTeam.id,
+          attempt_number: nextAttempt,
+          entered_quantity: enteredQuantity,
+          base_quantity: baseQuantity,
+        });
+
+      if (countError) {
+        console.error('Erro ao registrar histórico da contagem:', countError);
+        registerMessage.textContent = `Erro ao registrar no banco: ${countError.message}`;
+        return;
+      }
+
+      const shouldResolve = enteredQuantity === baseQuantity || nextAttempt >= 4;
+      if (shouldResolve) {
+        const { error: resolveError } = await supabase
+          .from('team_item_assignments')
+          .update({ attempts: nextAttempt, resolved: true })
+          .eq('id', assignmentId);
+
+        if (resolveError) {
+          console.error('Erro ao resolver atribuição:', resolveError);
+          registerMessage.textContent = `Erro ao atualizar o item: ${resolveError.message}`;
+          return;
+        }
+        registerMessage.textContent = enteredQuantity === baseQuantity
+          ? 'Quantidade correta salva. Item resolvido.'
+          : 'Item encerrado após quatro tentativas.';
+      } else {
+        const updateData = {
+          attempts: nextAttempt,
+          team_id: state.currentTeam.alt_team_id ?? state.currentTeam.id,
+          found_quantity: null,
+        };
+        const { error: moveError } = await supabase
+          .from('team_item_assignments')
+          .update(updateData)
+          .eq('id', assignmentId);
+
+        if (moveError) {
+          console.error('Erro ao mover atribuição:', moveError);
+          registerMessage.textContent = `Erro ao mover o item: ${moveError.message}`;
+          return;
+        }
+        registerMessage.textContent = `Quantidade incorreta. Item movido para a equipe ${updateData.team_id}.`;
+      }
+
+      await loadItemsForTeam(state.currentTeam.id);
+    } else if (enteredQuantity === baseQuantity) {
+      registerMessage.textContent = 'Quantidade correta salva. Item resolvido.';
+    } else if (assignmentData?.removed) {
       registerMessage.textContent = 'O item foi removido após 4 tentativas incorretas.';
+    } else if (assignmentData && assignmentData.team_id !== state.currentTeam.id) {
+      registerMessage.textContent = `Quantidade incorreta. Item movido para a equipe ${assignmentData.team_id}.`;
     } else {
-      registerMessage.textContent = `Quantidade incorreta. Item enviado para a equipe alternativa ${targetTeamId}.`;
+      registerMessage.textContent = 'Quantidade registrada. O sistema segue a regra do banco para movimentar ou remover o item.';
     }
+
+    // Mantém o ID digitado pelo usuário e apenas atualiza a lista da equipe atual.
+    // O item movido deixa de aparecer aqui; a equipe alternativa será carregada
+    // quando o usuário informar o ID dela no formulário.
+    await loadItemsForTeam(state.currentTeam.id);
+  } else {
+    const { error } = await supabase
+      .from('inventory_items')
+      .update({ found_quantity: enteredQuantity })
+      .eq('id', item.id);
+
+    if (error) {
+      console.error('Erro ao registrar quantidade do item legado:', error);
+      registerMessage.textContent = `Erro ao registrar a quantidade: ${error.message}`;
+      return;
+    }
+
+    if (enteredQuantity === baseQuantity) {
+      registerMessage.textContent = 'Quantidade correta salva. Item resolvido.';
+    } else {
+      registerMessage.textContent = 'Quantidade registrada. O sistema segue a regra do banco para movimentar ou remover o item.';
+    }
+
+    await loadItemsForTeam(state.currentTeam.id);
   }
 
-  if (state.currentTeam) {
-    await loadItemsForTeam(state.currentTeam.id);
-    state.selectedItem = null;
-    selectedItemCard.classList.add('hidden');
-  }
+  state.selectedItem = null;
+  if (selectedItemCard) selectedItemCard.classList.add('hidden');
+  if (itemFoundQtyInput) itemFoundQtyInput.value = '';
 }
 
 init();
