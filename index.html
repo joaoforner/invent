@@ -21,6 +21,7 @@
       <button id="btn-home" class="nav-btn active">Início</button>
       <button id="btn-team" class="nav-btn">Equipe</button>
       <button id="btn-inventory" class="nav-btn">Inventário</button>
+      <button id="btn-dashboard" class="nav-btn">Dashboard</button>
     </nav>
 
     <!-- Conteúdo das três seções; apenas uma fica ativa por vez. -->
@@ -40,6 +41,10 @@
               <button id="goto-team" class="secondary home-action-secondary">
                 <span class="action-icon">+</span>
                 <span><strong>Gerenciar equipes</strong><small>Cadastrar ou editar</small></span>
+              </button>
+              <button id="goto-dashboard" class="secondary home-action-dashboard">
+                <span class="action-icon">▣</span>
+                <span><strong>Dashboard</strong><small>Ver resumos</small></span>
               </button>
             </div>
           </div>
@@ -213,10 +218,97 @@
           <div id="register-message" class="message"></div>
         </div>
       </section>
+
+      <section id="dashboard-page" class="page-section">
+        <div id="dashboard-login-card" class="card dashboard-login-card">
+          <div class="dashboard-login-header">
+            <div class="dashboard-login-icon">▣</div>
+            <div>
+              <p class="eyebrow">ACESSO RESTRITO</p>
+              <h3>Dashboard operacional</h3>
+            </div>
+          </div>
+          <p class="dashboard-login-subtitle">Informe as credenciais para acessar o painel de contagem.</p>
+          <form id="dashboard-login-form" class="form-grid dashboard-login-form">
+            <label>
+              Usuário
+              <input type="text" id="dashboard-username" placeholder="Digite o usuário" required />
+            </label>
+            <label>
+              Senha
+              <input type="password" id="dashboard-password" placeholder="Digite a senha" required />
+            </label>
+            <button type="submit" class="primary dashboard-login-btn">Entrar no dashboard</button>
+          </form>
+          <div id="dashboard-login-message" class="message"></div>
+        </div>
+
+        <div id="dashboard-content" class="dashboard-content hidden">
+          <div class="section-intro">
+            <div>
+              <p class="eyebrow">RESUMO OPERACIONAL</p>
+              <h2>Dashboard de contagem</h2>
+              <p>Monitoramento dos itens já conferidos, acertos e itens com múltiplas contagens.</p>
+            </div>
+            <div class="dashboard-header-actions">
+              <span class="section-badge">DASHBOARD</span>
+              <button id="btn-dashboard-logout" class="secondary dashboard-logout-btn">Sair</button>
+            </div>
+          </div>
+
+          <div class="dashboard-actions">
+            <button id="btn-export-xlsx" class="primary dashboard-export-btn">Exportar XLSX</button>
+          </div>
+
+          <div id="dashboard-message" class="message"></div>
+
+          <div class="dashboard-grid">
+            <div class="dashboard-stat-card">
+              <span class="dashboard-label">Itens já conferidos</span>
+              <strong id="dashboard-total-counted">0</strong>
+            </div>
+            <div class="dashboard-stat-card success">
+              <span class="dashboard-label">Itens certos</span>
+              <strong id="dashboard-total-correct">0</strong>
+            </div>
+            <div class="dashboard-stat-card warning">
+              <span class="dashboard-label">Mais de 3 contagens</span>
+              <strong id="dashboard-total-retries">0</strong>
+            </div>
+          </div>
+
+          <div class="card dashboard-stage-card">
+            <div class="card-heading list-heading">
+              <div>
+                <p class="eyebrow">ACOMPANHAMENTO</p>
+                <h3>Etapas da contagem</h3>
+              </div>
+              <span class="list-caption">Itens por fase do processo</span>
+            </div>
+            <div class="dashboard-stage-legend">
+              <span class="legend-item"><i class="legend-dot normal"></i>Em andamento</span>
+              <span class="legend-item"><i class="legend-dot finished"></i>Finalizado</span>
+              <span class="legend-item"><i class="legend-dot pending"></i>1ª contagem pendente</span>
+            </div>
+            <div id="dashboard-stage-groups" class="dashboard-stage-groups"></div>
+          </div>
+
+          <div class="card dashboard-list-card">
+            <div class="card-heading list-heading">
+              <div>
+                <p class="eyebrow">ITENS FINALIZADOS</p>
+                <h3>Itens já contados e encerrados</h3>
+              </div>
+              <span class="list-caption">Resumo de todos os itens resolvidos</span>
+            </div>
+            <div id="dashboard-items" class="list-grid dashboard-items"></div>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
   <!-- Carrega o JavaScript como módulo e força atualização do cache do navegador. -->
-  <script type="module" src="script.js?v=7"></script>
+  <script type="module" src="script.js?v=9"></script>
 </body>
 </html>
