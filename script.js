@@ -60,6 +60,10 @@ const dashboardTotalRetries = document.getElementById('dashboard-total-retries')
 const dashboardItems = document.getElementById('dashboard-items');
 const dashboardStageGroups = document.getElementById('dashboard-stage-groups');
 const dashboardMessage = document.getElementById('dashboard-message');
+const dashboardReleaseList = document.getElementById('dashboard-release-list');
+const dashboardOverviewPanel = document.getElementById('dashboard-overview-panel');
+const dashboardReleasePanel = document.getElementById('dashboard-release-panel');
+const dashboardTabButtons = document.querySelectorAll('.dashboard-tab-btn');
 const exportXlsxButton = document.getElementById('btn-export-xlsx');
 const dashboardLoginForm = document.getElementById('dashboard-login-form');
 const dashboardLoginMessage = document.getElementById('dashboard-login-message');
@@ -68,6 +72,11 @@ const dashboardContent = document.getElementById('dashboard-content');
 const dashboardUsernameInput = document.getElementById('dashboard-username');
 const dashboardPasswordInput = document.getElementById('dashboard-password');
 const dashboardLogoutButton = document.getElementById('btn-dashboard-logout');
+const appConfirmModal = document.getElementById('app-confirm-modal');
+const appConfirmTitle = document.getElementById('app-confirm-title');
+const appConfirmMessage = document.getElementById('app-confirm-message');
+const appConfirmOk = document.getElementById('app-confirm-ok');
+const appConfirmCancel = document.getElementById('app-confirm-cancel');
 
 // Campos de entrada de formulários
 const teamName1Input = document.getElementById('team-name1');
@@ -175,6 +184,105 @@ function attachForms() {
   if (dashboardLogoutButton) {
     dashboardLogoutButton.addEventListener('click', logoutFromDashboard);
   }
+
+  if (appConfirmCancel) {
+    appConfirmCancel.addEventListener('click', () => closeConfirmModal());
+  }
+
+  if (appConfirmModal) {
+    appConfirmModal.addEventListener('click', (event) => {
+      if (event.target === appConfirmModal) {
+        closeConfirmModal();
+      }
+    });
+  }
+
+  dashboardTabButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      setDashboardTab(button.dataset.dashboardTab);
+    });
+  });
+
+  if (dashboardReleaseList) {
+    dashboardReleaseList.addEventListener('click', async (event) => {
+      const button = event.target.closest('button');
+      if (!button) return;
+
+      const { action, assignmentId } = button.dataset;
+      if (!action || !assignmentId) return;
+
+      if (action === 'release-yes') {
+        const target = dashboardReleaseList.querySelector(`[data-target-id="${assignmentId}"]`);
+        if (target) target.classList.add('visible');
+        const input = dashboardReleaseList.querySelector(`[data-team-input="${assignmentId}"]`);
+        if (input) input.focus();
+        return;
+      }
+
+      if (action === 'release-no') {
+        showConfirmModal({
+          title: 'Encerrar contagem',
+          message: 'Deseja encerrar a contagem deste item e não liberá-lo para a próxima etapa?',
+          confirmText: 'Encerrar',
+          onConfirm: async () => {
+            await finishDashboardRelease(assignmentId, false);
+          }
+        });
+        return;
+      }
+
+      if (action === 'confirm-release') {
+        const input = dashboardReleaseList.querySelector(`[data-team-input="${assignmentId}"]`);
+        const teamId = Number(input?.value ?? NaN);
+        if (!Number.isFinite(teamId) || teamId <= 0) {
+          if (dashboardMessage) dashboardMessage.textContent = 'Informe um ID de equipe válido para liberar o item.';
+          return;
+        }
+        await moveItemToTeam(assignmentId, teamId);
+      }
+    });
+  }
+}
+
+function showConfirmModal({ title, message, confirmText = 'Confirmar', onConfirm }) {
+  if (!appConfirmModal || !appConfirmTitle || !appConfirmMessage || !appConfirmOk) {
+    return false;
+  }
+
+  appConfirmTitle.textContent = title;
+  appConfirmMessage.textContent = message;
+  appConfirmOk.textContent = confirmText;
+
+  if (typeof onConfirm === 'function') {
+    appConfirmOk.onclick = () => {
+      closeConfirmModal();
+      onConfirm();
+    };
+  } else {
+    appConfirmOk.onclick = closeConfirmModal;
+  }
+
+  appConfirmModal.classList.remove('hidden');
+  appConfirmModal.setAttribute('aria-hidden', 'false');
+  return true;
+}
+
+function closeConfirmModal() {
+  if (!appConfirmModal) return;
+  appConfirmModal.classList.add('hidden');
+  appConfirmModal.setAttribute('aria-hidden', 'true');
+}
+
+function setDashboardTab(tabName) {
+  if (!dashboardOverviewPanel || !dashboardReleasePanel) return;
+
+  const isOverview = tabName === 'overview';
+  dashboardOverviewPanel.classList.toggle('hidden', !isOverview);
+  dashboardReleasePanel.classList.toggle('hidden', isOverview);
+
+  dashboardTabButtons.forEach((button) => {
+    button.classList.toggle('active', button.dataset.dashboardTab === tabName);
+  });
 }
 
 function logoutFromDashboard() {
@@ -306,10 +414,274 @@ async function exportDashboardToXlsx() {
   dashboardMessage.textContent = `Arquivo Excel gerado com ${rows.length} registro(s).`;
 }
 
+async function moveItemToTeam(assignmentId, targetTeamId) {
+  const { data: targetTeam, error: teamError } = await supabase
+    .from('teams')
+    .select('id')
+    .eq('id', targetTeamId)
+    .maybeSingle();
+
+  if (teamError || !targetTeam) {
+    if (dashboardMessage) dashboardMessage.textContent = 'Equipe informada não existe.';
+    return;
+  }
+
+  const { data: assignmentData, error: assignmentError } = await supabase
+    .from('team_item_assignments')
+    .select('attempts')
+    .eq('id', assignmentId)
+    .maybeSingle();
+
+  if (assignmentError) {
+    console.error('Erro ao buscar tentativa atual do item:', assignmentError);
+    if (dashboardMessage) dashboardMessage.textContent = `Erro ao buscar o item: ${assignmentError.message}`;
+    return;
+  }
+
+  const nextAttempt = Number(assignmentData?.attempts ?? 0) || 2;
+
+  const { error: updateError } = await supabase
+    .from('team_item_assignments')
+    .update({
+      team_id: targetTeamId,
+      attempts: nextAttempt,
+      found_quantity: null,
+      resolved: false,
+      removed: false,
+    })
+    .eq('id', assignmentId);
+
+  if (updateError) {
+    console.error('Erro ao mover item para a equipe:', updateError);
+    if (dashboardMessage) dashboardMessage.textContent = `Erro ao mover item: ${updateError.message}`;
+    return;
+  }
+
+  const nextStageLabel = nextAttempt >= 3 ? '4ª contagem' : '3ª contagem';
+
+  if (dashboardMessage) {
+    dashboardMessage.textContent = `Item liberado para a equipe ${targetTeamId} e aguardando a ${nextStageLabel}.`;
+  }
+  await loadDashboard();
+  await loadDashboardReleaseItems();
+}
+
+async function finishDashboardRelease(assignmentId, shouldRelease) {
+  const { data: latestCount, error: countError } = await supabase
+    .from('team_item_counts')
+    .select('attempt_number, entered_quantity')
+    .eq('assignment_id', assignmentId)
+    .order('attempt_number', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const fallbackQuantity = Number(latestCount?.entered_quantity ?? 0);
+  const latestAttempt = Number(latestCount?.attempt_number ?? 2);
+
+  let updateData = {
+    resolved: true,
+    attempts: latestAttempt,
+    found_quantity: fallbackQuantity,
+    removed: false,
+  };
+
+  if (shouldRelease) {
+    updateData = {
+      resolved: false,
+      attempts: latestAttempt,
+      found_quantity: null,
+      removed: false,
+    };
+  }
+
+  const { error } = await supabase
+    .from('team_item_assignments')
+    .update(updateData)
+    .eq('id', assignmentId);
+
+  if (error) {
+    console.error('Erro ao encerrar liberacao do item:', error);
+    if (dashboardMessage) dashboardMessage.textContent = `Erro ao encerrar o item: ${error.message}`;
+    return;
+  }
+
+  const nextStageText = latestAttempt >= 3 ? '4ª contagem' : '3ª contagem';
+
+  if (dashboardMessage) {
+    dashboardMessage.textContent = shouldRelease
+      ? `Item liberado para a ${nextStageText}.`
+      : `Contagem encerrada e o valor ${fallbackQuantity} foi mantido nos itens finalizados.`;
+  }
+
+  await loadDashboard();
+  await loadDashboardReleaseItems();
+}
+
+async function loadDashboardReleaseItems() {
+  if (!dashboardReleaseList) return;
+
+  const { data: assignments, error: assignmentError } = await supabase
+    .from('team_item_assignments')
+    .select('id, team_id, master_item_id, resolved, removed, attempts, found_quantity')
+    .eq('resolved', false)
+    .eq('removed', false)
+    .order('id', { ascending: true });
+
+  if (assignmentError) {
+    console.error('Erro ao carregar itens pendentes de liberação:', assignmentError);
+    dashboardReleaseList.innerHTML = '<div class="dashboard-release-empty">Não foi possível carregar a fila de liberação.</div>';
+    return;
+  }
+
+  if (!assignments || assignments.length === 0) {
+    dashboardReleaseList.innerHTML = '<div class="dashboard-release-empty">Nenhum item exige liberação.</div>';
+    return;
+  }
+
+  const assignmentIds = assignments.map((item) => item.id);
+  const { data: countHistory, error: countError } = await supabase
+    .from('team_item_counts')
+    .select('id, assignment_id, master_item_id, team_id, attempt_number, entered_quantity, base_quantity, created_at')
+    .in('assignment_id', assignmentIds)
+    .order('created_at', { ascending: true });
+
+  if (countError) {
+    console.error('Erro ao carregar histórico de contagem para aprovação:', countError);
+    dashboardReleaseList.innerHTML = '<div class="dashboard-release-empty">Não foi possível carregar a fila de liberação.</div>';
+    return;
+  }
+
+  const masterIds = [...new Set((assignments || []).map((item) => item.master_item_id).filter(Boolean))];
+  let masterItems = [];
+  if (masterIds.length) {
+    const { data: masters, error: masterError } = await supabase
+      .from('master_inventory_items')
+      .select('id, descricao, material, base_quantity')
+      .in('id', masterIds);
+
+    if (!masterError && masters) {
+      masterItems = masters;
+    }
+  }
+  const masterMap = Object.fromEntries(masterItems.map((item) => [item.id, item]));
+
+  const teamIds = [...new Set((assignments || []).map((item) => item.team_id).filter(Boolean))];
+  let teams = [];
+  if (teamIds.length) {
+    const { data: teamData, error: teamError } = await supabase
+      .from('teams')
+      .select('id, name1, name2')
+      .in('id', teamIds);
+
+    if (!teamError && teamData) {
+      teams = teamData;
+    }
+  }
+  const teamMap = Object.fromEntries(teams.map((team) => [team.id, team]));
+
+  const lastCountByAssignment = new Map();
+  const historyByAssignment = new Map();
+
+  (countHistory || []).forEach((count) => {
+    if (!count.assignment_id) return;
+    const assignmentId = Number(count.assignment_id);
+    const attempt = Number(count.attempt_number ?? 0);
+    const existing = lastCountByAssignment.get(assignmentId);
+    if (!existing || attempt > Number(existing.attempt_number ?? 0)) {
+      lastCountByAssignment.set(assignmentId, count);
+    }
+
+    const history = historyByAssignment.get(assignmentId) || [];
+    history.push({
+      attempt,
+      quantity: Number(count.entered_quantity ?? 0),
+      createdAt: count.created_at,
+    });
+    historyByAssignment.set(assignmentId, history.sort((a, b) => a.attempt - b.attempt));
+  });
+
+  const pendingApprovals = [];
+  (assignments || []).forEach((assignment) => {
+    if (!assignment || assignment.resolved || assignment.removed) return;
+    if (assignment.found_quantity === null || assignment.found_quantity === undefined) return;
+
+    const assignmentId = Number(assignment.id);
+    const latestCount = lastCountByAssignment.get(assignmentId) || null;
+    const currentAttempt = Number(assignment.attempts ?? latestCount?.attempt_number ?? 0);
+    const enteredQuantity = Number(latestCount?.entered_quantity ?? assignment.found_quantity ?? NaN);
+    const baseQuantity = Number(latestCount?.base_quantity ?? masterMap[assignment.master_item_id]?.base_quantity ?? 0);
+
+    if (currentAttempt >= 2 && currentAttempt <= 3 && Number.isFinite(enteredQuantity) && Number.isFinite(baseQuantity) && enteredQuantity !== baseQuantity) {
+      pendingApprovals.push({
+        assignmentId,
+        masterItemId: assignment.master_item_id,
+        teamId: assignment.team_id,
+        firstQuantity: Number(historyByAssignment.get(assignmentId)?.[0]?.quantity ?? enteredQuantity),
+        secondQuantity: enteredQuantity,
+        attempts: currentAttempt,
+        repeatedAttempt: currentAttempt,
+        history: historyByAssignment.get(assignmentId) || [{ attempt: currentAttempt, quantity: enteredQuantity }],
+      });
+    }
+  });
+
+  if (!pendingApprovals.length) {
+    dashboardReleaseList.innerHTML = '<div class="dashboard-release-empty">Nenhum item exige liberação.</div>';
+    return;
+  }
+
+  dashboardReleaseList.innerHTML = pendingApprovals.map((item) => {
+    const team = teamMap[item.teamId] || null;
+    const masterItem = masterMap[item.masterItemId] || null;
+    const itemLabel = masterItem?.descricao || masterItem?.material || `Item ${item.masterItemId}`;
+    const teamLabel = team ? `${team.name1} e ${team.name2}` : `Equipe ${item.teamId}`;
+    const approvalLabel = item.repeatedAttempt >= 3 ? '3ª contagem incorreta' : '2ª contagem incorreta';
+    const nextStageStep = item.repeatedAttempt >= 3 ? '4ª contagem' : '3ª contagem';
+    const releaseDescription = item.repeatedAttempt >= 3
+      ? 'A 3ª contagem foi registrada com valor incorreto. Decida se libera para a 4ª contagem ou encerra o item.'
+      : 'A 2ª contagem foi registrada com valor incorreto. Decida se libera para a 3ª contagem ou encerra o item.';
+    const historyMarkup = (item.history || [])
+      .map((entry) => `<li><span>${entry.attempt}ª contagem</span><strong>${entry.quantity}</strong></li>`)
+      .join('');
+
+    return `
+      <article class="dashboard-release-item">
+        <div>
+          <h4>${itemLabel}</h4>
+          <span class="dashboard-release-tag">Aguardando decisão</span>
+          <div class="dashboard-release-meta">
+            <span>Equipe: ${teamLabel}</span>
+            <span>${approvalLabel}</span>
+            <span>${item.repeatedAttempt - 1}ª contagem: ${item.firstQuantity}</span>
+            <span>${item.repeatedAttempt}ª contagem: ${item.secondQuantity}</span>
+          </div>
+          <div class="dashboard-release-note">${releaseDescription} Próxima etapa: ${nextStageStep}.</div>
+          <div class="dashboard-release-history">
+            <div class="dashboard-release-history-title">Histórico da contagem</div>
+            <ul class="dashboard-release-history-list">
+              ${historyMarkup}
+            </ul>
+          </div>
+        </div>
+        <div class="dashboard-release-actions">
+          <button type="button" class="small-btn success" data-action="release-yes" data-assignment-id="${item.assignmentId}">Sim</button>
+          <button type="button" class="small-btn danger" data-action="release-no" data-assignment-id="${item.assignmentId}">Não</button>
+        </div>
+        <div class="dashboard-release-target" data-target-id="${item.assignmentId}">
+          <input type="number" min="1" placeholder="ID da equipe" data-team-input="${item.assignmentId}" />
+          <button type="button" class="small-btn success" data-action="confirm-release" data-assignment-id="${item.assignmentId}">Confirmar</button>
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
 async function loadDashboard() {
   if (!dashboardTotalCounted || !dashboardTotalCorrect || !dashboardTotalRetries || !dashboardItems) {
     return;
   }
+
+  await loadDashboardReleaseItems();
 
   const { data: assignments, error } = await supabase
     .from('team_item_assignments')
@@ -393,59 +765,58 @@ async function loadDashboard() {
     4: [],
   };
 
-  const stageState = new Map();
+  const assignmentById = new Map((assignments || []).map((assignment) => [Number(assignment.id), assignment]));
 
-  (countHistory || []).forEach((count) => {
-    const stageKey = Math.min(4, Number(count.attempt_number ?? 1));
-    const itemName = masterMap[count.master_item_id]?.descricao || masterMap[count.master_item_id]?.material || `Item ${count.master_item_id}`;
-    const itemTeam = teamMap[count.team_id] ? `${teamMap[count.team_id].name1} e ${teamMap[count.team_id].name2}` : `Equipe ${count.team_id}`;
-    const uniqueKey = `${count.assignment_id}-${count.attempt_number}`;
+  (assignments || [])
+    .filter((assignment) => !assignment.resolved && !assignment.removed)
+    .forEach((assignment) => {
+      const assignmentId = Number(assignment.id);
+      const attempts = Number(assignment.attempts ?? 0);
+      const itemName = masterMap[assignment.master_item_id]?.descricao || masterMap[assignment.master_item_id]?.material || `Item ${assignment.master_item_id}`;
+      const teamLabel = teamMap[assignment.team_id] ? `${teamMap[assignment.team_id].name1} e ${teamMap[assignment.team_id].name2}` : `Equipe ${assignment.team_id}`;
+      const latestCount = (countHistory || [])
+        .filter((count) => Number(count.assignment_id) === assignmentId)
+        .sort((a, b) => Number(b.attempt_number ?? 0) - Number(a.attempt_number ?? 0))[0];
 
-    if (!stageState.has(uniqueKey)) {
-      stageState.set(uniqueKey, {
-        assignmentId: count.assignment_id,
-        masterItemId: count.master_item_id,
+      const stageKey = attempts === 0 ? 1 : Math.min(4, attempts);
+
+      stageGroups[stageKey].push({
+        assignmentId,
         itemName,
-        teamLabel: itemTeam,
-        countNumber: Number(count.attempt_number ?? 1),
-        quantity: Number(count.entered_quantity ?? 0),
-        isFinished: Number(count.attempt_number ?? 1) >= 4,
+        teamLabel,
+        quantity: Number(latestCount?.entered_quantity ?? 0),
+        status: attempts === 0 ? 'Não contado' : attempts >= 4 ? 'Última tentativa' : 'Em andamento',
+        countNumber: attempts,
       });
-    }
-
-    const stageEntry = stageState.get(uniqueKey);
-    if (stageEntry) {
-      stageGroups[stageKey].push(stageEntry);
-    }
-  });
-
-  const dedupedStageGroups = Object.fromEntries(
-    Object.entries(stageGroups).map(([stage, values]) => [stage, values.filter((item, index, arr) => arr.findIndex((candidate) => candidate.assignmentId === item.assignmentId && candidate.countNumber === item.countNumber) === index)])
-  );
+    });
 
   if (dashboardStageGroups) {
     const stageLabels = {
       1: '1ª contagem',
       2: '2ª contagem',
       3: '3ª contagem',
-      4: '4ª contagem / finalizado',
+      4: '4ª contagem',
     };
 
-    const allFinishedAssignments = new Set((assignments || []).filter((item) => item.resolved).map((item) => item.id));
+    const stageDescriptions = {
+      1: 'Ainda não contado',
+      2: 'Valor informado, mas não é o correto',
+      3: 'Liberado após aprovação para nova contagem',
+      4: 'Última tentativa antes do fechamento',
+    };
 
-    dashboardStageGroups.innerHTML = Object.entries(dedupedStageGroups)
+    dashboardStageGroups.innerHTML = Object.entries(stageGroups)
       .map(([stage, items]) => {
         const safeItems = items || [];
         const content = safeItems.length
           ? safeItems.map((item) => {
-              const isFinished = allFinishedAssignments.has(item.assignmentId) || Number(item.countNumber ?? 0) >= 4;
-              const statusClass = isFinished ? 'finished' : Number(stage) === 1 ? 'pending' : 'normal';
-              const statusLabel = isFinished ? 'Finalizado' : Number(stage) === 1 ? '1ª contagem pendente' : 'Em andamento';
+              const statusClass = Number(stage) === 1 ? 'pending' : 'normal';
+              const statusLabel = Number(stage) === 1 ? 'Sem contagem' : stageDescriptions[Number(stage)] || item.status;
               return `
                 <li class="${statusClass}">
                   <span class="dashboard-stage-item-name">${item.itemName}</span>
                   <span class="dashboard-stage-item-meta">Equipe ${item.teamLabel}</span>
-                  <span class="dashboard-stage-item-meta">Qtd: ${item.quantity}</span>
+                  <span class="dashboard-stage-item-meta">Qtd: ${item.quantity || 0}</span>
                   <span class="dashboard-stage-status ${statusClass}">${statusLabel}</span>
                 </li>
               `;
@@ -458,6 +829,7 @@ async function loadDashboard() {
               <strong>${stageLabels[stage]}</strong>
               <span>${safeItems.length}</span>
             </div>
+            <div class="dashboard-stage-subtitle">${stageDescriptions[Number(stage)]}</div>
             <ul class="dashboard-stage-list">${content}</ul>
           </div>
         `;
@@ -611,21 +983,25 @@ async function updateTeam(teamId, name1, name2) {
 
 // Confirma e exclui uma equipe, marcando itens legados relacionados como removidos.
 async function deleteTeam(teamId) {
-  if (!confirm('Deseja realmente excluir esta equipe?')) {
-    return;
-  }
-  const { error } = await supabase.from('teams').delete().eq('id', teamId);
-  if (error) {
-    teamMessage.textContent = 'Falha ao excluir equipe.';
-    return;
-  }
-  const { error: invError } = await supabase.from('inventory_items').update({ removed: true }).eq('assigned_team_id', teamId);
-  if (invError) {
-    console.error('Erro ao marcar itens como removidos:', invError);
-  }
-  await rebuildAltLinks();
-  teamMessage.textContent = 'Equipe excluída com sucesso.';
-  await loadTeams();
+  showConfirmModal({
+    title: 'Excluir equipe',
+    message: 'Deseja realmente excluir esta equipe?',
+    confirmText: 'Excluir',
+    onConfirm: async () => {
+      const { error } = await supabase.from('teams').delete().eq('id', teamId);
+      if (error) {
+        teamMessage.textContent = 'Falha ao excluir equipe.';
+        return;
+      }
+      const { error: invError } = await supabase.from('inventory_items').update({ removed: true }).eq('assigned_team_id', teamId);
+      if (invError) {
+        console.error('Erro ao marcar itens como removidos:', invError);
+      }
+      await rebuildAltLinks();
+      teamMessage.textContent = 'Equipe excluída com sucesso.';
+      await loadTeams();
+    }
+  });
 }
 
 // Escolhe aleatoriamente uma equipe alternativa para cada equipe cadastrada.
@@ -692,17 +1068,21 @@ async function loadItemsForTeam(teamId) {
       .eq('team_id', teamId);
     if (viewResp.error) throw viewResp.error;
     // Converte as linhas da view para o formato esperado pela interface.
-    data = (viewResp.data || []).filter((r) => !r.removed && !r.resolved).map((r) => ({
-      id: r.assignment_id,
-      name: r.descricao || r.material || `item-${r.master_item_id}`,
-      base_quantity: r.base_quantity,
-      attempts: r.attempts,
-      assigned_team_id: r.team_id,
-      resolved: r.resolved,
-      removed: r.removed,
-      master_item_id: r.master_item_id,
-      _table: 'team_item_assignments',
-    }));
+    data = (viewResp.data || [])
+      .filter((r) => !r.removed && !r.resolved)
+      .filter((r) => !(Number(r.attempts ?? 0) >= 2 && r.found_quantity !== null && r.found_quantity !== undefined))
+      .map((r) => ({
+        id: r.assignment_id,
+        name: r.descricao || r.material || `item-${r.master_item_id}`,
+        base_quantity: r.base_quantity,
+        attempts: r.attempts,
+        assigned_team_id: r.team_id,
+        resolved: r.resolved,
+        removed: r.removed,
+        master_item_id: r.master_item_id,
+        found_quantity: r.found_quantity,
+        _table: 'team_item_assignments',
+      }));
     // Busca em lote os campos adicionais dos materiais mestres, quando existirem IDs.
     const masterIds = Array.from(new Set(data.map((i) => i.master_item_id).filter(Boolean)));
     if (masterIds.length) {
@@ -721,11 +1101,11 @@ async function loadItemsForTeam(teamId) {
     // Usa a tabela inventory_items se a view não existir ou apresentar erro.
     const resp = await supabase
       .from('inventory_items')
-      .select('id, name, base_quantity, attempts, assigned_team_id, resolved, removed')
+      .select('id, name, base_quantity, attempts, assigned_team_id, resolved, removed, found_quantity')
       .eq('assigned_team_id', teamId)
       .eq('removed', false)
       .order('id', { ascending: true });
-    data = resp.data;
+    data = (resp.data || []).filter((item) => !(Number(item.attempts ?? 0) >= 2 && item.found_quantity !== null && item.found_quantity !== undefined));
     error = resp.error;
   }
 
@@ -990,20 +1370,23 @@ async function registerItemQuantity() {
       } else {
         const updateData = {
           attempts: nextAttempt,
-          team_id: state.currentTeam.alt_team_id ?? state.currentTeam.id,
-          found_quantity: null,
+          found_quantity: enteredQuantity,
+          resolved: false,
+          removed: false,
         };
-        const { error: moveError } = await supabase
+
+        const { error: keepError } = await supabase
           .from('team_item_assignments')
           .update(updateData)
           .eq('id', assignmentId);
 
-        if (moveError) {
-          console.error('Erro ao mover atribuição:', moveError);
-          registerMessage.textContent = `Erro ao mover o item: ${moveError.message}`;
+        if (keepError) {
+          console.error('Erro ao manter item para aprovação:', keepError);
+          registerMessage.textContent = `Erro ao registrar item para aprovação: ${keepError.message}`;
           return;
         }
-        registerMessage.textContent = `Quantidade incorreta. Item movido para a equipe ${updateData.team_id}.`;
+
+        registerMessage.textContent = 'Quantidade registrada. O item foi enviado para aprovação manual antes da próxima etapa.';
       }
 
       await loadItemsForTeam(state.currentTeam.id);
@@ -1012,9 +1395,9 @@ async function registerItemQuantity() {
     } else if (assignmentData?.removed) {
       registerMessage.textContent = 'O item foi removido após 4 tentativas incorretas.';
     } else if (assignmentData && assignmentData.team_id !== state.currentTeam.id) {
-      registerMessage.textContent = `Quantidade incorreta. Item movido para a equipe ${assignmentData.team_id}.`;
+      registerMessage.textContent = 'Quantidade registrada. O item foi enviado para aprovação manual antes da próxima etapa.';
     } else {
-      registerMessage.textContent = 'Quantidade registrada. O sistema segue a regra do banco para movimentar ou remover o item.';
+      registerMessage.textContent = 'Quantidade registrada. O item foi enviado para aprovação manual antes da próxima etapa.';
     }
 
     // Mantém o ID digitado pelo usuário e apenas atualiza a lista da equipe atual.

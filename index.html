@@ -260,52 +260,87 @@
             <button id="btn-export-xlsx" class="primary dashboard-export-btn">Exportar XLSX</button>
           </div>
 
+          <div class="dashboard-tab-bar" aria-label="Abas do dashboard">
+            <button type="button" class="dashboard-tab-btn active" data-dashboard-tab="overview">Resumo</button>
+            <button type="button" class="dashboard-tab-btn" data-dashboard-tab="release">Aprovação</button>
+          </div>
+
           <div id="dashboard-message" class="message"></div>
 
-          <div class="dashboard-grid">
-            <div class="dashboard-stat-card">
-              <span class="dashboard-label">Itens já conferidos</span>
-              <strong id="dashboard-total-counted">0</strong>
+          <div id="dashboard-overview-panel" class="dashboard-panel">
+            <div class="dashboard-grid">
+              <div class="dashboard-stat-card">
+                <span class="dashboard-label">Itens já conferidos</span>
+                <strong id="dashboard-total-counted">0</strong>
+              </div>
+              <div class="dashboard-stat-card success">
+                <span class="dashboard-label">Itens certos</span>
+                <strong id="dashboard-total-correct">0</strong>
+              </div>
+              <div class="dashboard-stat-card warning">
+                <span class="dashboard-label">Mais de 3 contagens</span>
+                <strong id="dashboard-total-retries">0</strong>
+              </div>
             </div>
-            <div class="dashboard-stat-card success">
-              <span class="dashboard-label">Itens certos</span>
-              <strong id="dashboard-total-correct">0</strong>
+
+            <div class="card dashboard-stage-card">
+              <div class="card-heading list-heading">
+                <div>
+                  <p class="eyebrow">ACOMPANHAMENTO</p>
+                  <h3>Etapas da contagem</h3>
+                </div>
+                <span class="list-caption">Itens por fase do processo</span>
+              </div>
+              <div class="dashboard-stage-legend">
+                <span class="legend-item"><i class="legend-dot normal"></i>Em andamento</span>
+                <span class="legend-item"><i class="legend-dot finished"></i>Finalizado</span>
+                <span class="legend-item"><i class="legend-dot pending"></i>Sem contagem</span>
+              </div>
+              <div class="dashboard-stage-note">
+                Fluxo da contagem: 1ª etapa = item ainda não contado; 2ª etapa = valor informado, mas precisa revisão; 3ª etapa = liberado após aprovação para nova contagem; 4ª etapa = última tentativa antes do fechamento.
+              </div>
+              <div id="dashboard-stage-groups" class="dashboard-stage-groups"></div>
             </div>
-            <div class="dashboard-stat-card warning">
-              <span class="dashboard-label">Mais de 3 contagens</span>
-              <strong id="dashboard-total-retries">0</strong>
+
+            <div class="card dashboard-list-card">
+              <div class="card-heading list-heading">
+                <div>
+                  <p class="eyebrow">ITENS FINALIZADOS</p>
+                  <h3>Itens já contados e encerrados</h3>
+                </div>
+                <span class="list-caption">Resumo de todos os itens resolvidos</span>
+              </div>
+              <div id="dashboard-items" class="list-grid dashboard-items"></div>
             </div>
           </div>
 
-          <div class="card dashboard-stage-card">
-            <div class="card-heading list-heading">
-              <div>
-                <p class="eyebrow">ACOMPANHAMENTO</p>
-                <h3>Etapas da contagem</h3>
+          <div id="dashboard-release-panel" class="dashboard-panel hidden">
+            <div class="card dashboard-release-card">
+              <div class="card-heading list-heading">
+                <div>
+                  <p class="eyebrow">APROVAÇÃO</p>
+                  <h3>Painel de aprovação</h3>
+                </div>
+                <span class="list-caption">Itens com contagem repetida aguardam decisão antes da próxima etapa</span>
               </div>
-              <span class="list-caption">Itens por fase do processo</span>
+              <div id="dashboard-release-list" class="dashboard-release-list"></div>
             </div>
-            <div class="dashboard-stage-legend">
-              <span class="legend-item"><i class="legend-dot normal"></i>Em andamento</span>
-              <span class="legend-item"><i class="legend-dot finished"></i>Finalizado</span>
-              <span class="legend-item"><i class="legend-dot pending"></i>1ª contagem pendente</span>
-            </div>
-            <div id="dashboard-stage-groups" class="dashboard-stage-groups"></div>
-          </div>
-
-          <div class="card dashboard-list-card">
-            <div class="card-heading list-heading">
-              <div>
-                <p class="eyebrow">ITENS FINALIZADOS</p>
-                <h3>Itens já contados e encerrados</h3>
-              </div>
-              <span class="list-caption">Resumo de todos os itens resolvidos</span>
-            </div>
-            <div id="dashboard-items" class="list-grid dashboard-items"></div>
           </div>
         </div>
       </section>
     </main>
+  </div>
+
+  <div id="app-confirm-modal" class="app-confirm-modal hidden" aria-hidden="true">
+    <div class="app-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="app-confirm-title">
+      <div class="app-confirm-icon">!</div>
+      <h3 id="app-confirm-title">Confirmar ação</h3>
+      <p id="app-confirm-message">Deseja continuar?</p>
+      <div class="app-confirm-actions">
+        <button id="app-confirm-cancel" type="button" class="secondary">Cancelar</button>
+        <button id="app-confirm-ok" type="button" class="primary">Confirmar</button>
+      </div>
+    </div>
   </div>
 
   <!-- Carrega o JavaScript como módulo e força atualização do cache do navegador. -->
