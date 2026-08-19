@@ -54,9 +54,11 @@ const gotoInventory = document.getElementById('goto-inventory');
 const gotoDashboard = document.getElementById('goto-dashboard');
 
 // Elementos do dashboard
+const dashboardMaterialTotal = document.getElementById('dashboard-material-total');
 const dashboardTotalCounted = document.getElementById('dashboard-total-counted');
-const dashboardTotalCorrect = document.getElementById('dashboard-total-correct');
-const dashboardTotalRetries = document.getElementById('dashboard-total-retries');
+const dashboardTotalProgress = document.getElementById('dashboard-total-progress');
+const dashboardTotalApproval = document.getElementById('dashboard-total-approval');
+const dashboardTotalTeams = document.getElementById('dashboard-total-teams');
 const dashboardItems = document.getElementById('dashboard-items');
 const dashboardStageGroups = document.getElementById('dashboard-stage-groups');
 const dashboardMessage = document.getElementById('dashboard-message');
@@ -318,9 +320,11 @@ function loginToDashboard() {
     if (dashboardLoginMessage) dashboardLoginMessage.textContent = '';
     if (dashboardUsernameInput) dashboardUsernameInput.value = '';
     if (dashboardPasswordInput) dashboardPasswordInput.value = '';
+    if (dashboardMaterialTotal) dashboardMaterialTotal.textContent = '0';
     if (dashboardTotalCounted) dashboardTotalCounted.textContent = '0';
-    if (dashboardTotalCorrect) dashboardTotalCorrect.textContent = '0';
-    if (dashboardTotalRetries) dashboardTotalRetries.textContent = '0';
+    if (dashboardTotalProgress) dashboardTotalProgress.textContent = '0';
+    if (dashboardTotalApproval) dashboardTotalApproval.textContent = '0';
+    if (dashboardTotalTeams) dashboardTotalTeams.textContent = '0';
     loadDashboard();
     return;
   }
@@ -646,30 +650,38 @@ async function loadDashboardReleaseItems() {
 
     return `
       <article class="dashboard-release-item">
-        <div>
-          <h4>${itemLabel}</h4>
+        <div class="dashboard-release-item-header">
+          <div class="dashboard-release-item-main">
+            <h4>${itemLabel}</h4>
+            <div class="dashboard-release-meta">
+              <span><strong>Equipe:</strong> ${teamLabel}</span>
+              <span><strong>Etapa:</strong> ${approvalLabel}</span>
+              <span><strong>${item.repeatedAttempt - 1}ª:</strong> ${item.firstQuantity}</span>
+              <span><strong>${item.repeatedAttempt}ª:</strong> ${item.secondQuantity}</span>
+            </div>
+          </div>
           <span class="dashboard-release-tag">Aguardando decisão</span>
-          <div class="dashboard-release-meta">
-            <span>Equipe: ${teamLabel}</span>
-            <span>${approvalLabel}</span>
-            <span>${item.repeatedAttempt - 1}ª contagem: ${item.firstQuantity}</span>
-            <span>${item.repeatedAttempt}ª contagem: ${item.secondQuantity}</span>
-          </div>
-          <div class="dashboard-release-note">${releaseDescription} Próxima etapa: ${nextStageStep}.</div>
-          <div class="dashboard-release-history">
-            <div class="dashboard-release-history-title">Histórico da contagem</div>
-            <ul class="dashboard-release-history-list">
-              ${historyMarkup}
-            </ul>
-          </div>
         </div>
+
+        <div class="dashboard-release-note">
+          <strong>Decisão necessária:</strong> ${releaseDescription} Próxima etapa: ${nextStageStep}.
+        </div>
+
+        <div class="dashboard-release-history">
+          <div class="dashboard-release-history-title">Histórico da contagem</div>
+          <ul class="dashboard-release-history-list">
+            ${historyMarkup}
+          </ul>
+        </div>
+
         <div class="dashboard-release-actions">
-          <button type="button" class="small-btn success" data-action="release-yes" data-assignment-id="${item.assignmentId}">Sim</button>
-          <button type="button" class="small-btn danger" data-action="release-no" data-assignment-id="${item.assignmentId}">Não</button>
+          <button type="button" class="small-btn success" data-action="release-yes" data-assignment-id="${item.assignmentId}">Liberar para próxima etapa</button>
+          <button type="button" class="small-btn danger" data-action="release-no" data-assignment-id="${item.assignmentId}">Encerrar item</button>
         </div>
+
         <div class="dashboard-release-target" data-target-id="${item.assignmentId}">
           <input type="number" min="1" placeholder="ID da equipe" data-team-input="${item.assignmentId}" />
-          <button type="button" class="small-btn success" data-action="confirm-release" data-assignment-id="${item.assignmentId}">Confirmar</button>
+          <button type="button" class="small-btn success" data-action="confirm-release" data-assignment-id="${item.assignmentId}">Confirmar equipe</button>
         </div>
       </article>
     `;
@@ -677,61 +689,68 @@ async function loadDashboardReleaseItems() {
 }
 
 async function loadDashboard() {
-  if (!dashboardTotalCounted || !dashboardTotalCorrect || !dashboardTotalRetries || !dashboardItems) {
+  if (!dashboardMaterialTotal || !dashboardTotalCounted || !dashboardTotalProgress || !dashboardTotalApproval || !dashboardTotalTeams || !dashboardItems) {
     return;
   }
 
   await loadDashboardReleaseItems();
 
-  const { data: assignments, error } = await supabase
-    .from('team_item_assignments')
-    .select('id, team_id, attempts, resolved, found_quantity, master_item_id')
-    .order('id', { ascending: true });
+  const [{ data: assignments, error }, { data: countHistory, error: countError }, { data: allTeams, error: teamsError }, { data: allMasterItems, error: masterError }] = await Promise.all([
+    supabase
+      .from('team_item_assignments')
+      .select('id, team_id, attempts, resolved, found_quantity, master_item_id, removed')
+      .order('id', { ascending: true }),
+    supabase
+      .from('team_item_counts')
+      .select('id, assignment_id, master_item_id, team_id, attempt_number, entered_quantity, created_at')
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('teams')
+      .select('id')
+      .order('id', { ascending: true }),
+    supabase
+      .from('master_inventory_items')
+      .select('id, descricao, material, base_quantity')
+      .order('id', { ascending: true })
+  ]);
 
-  const { data: countHistory, error: countError } = await supabase
-    .from('team_item_counts')
-    .select('id, assignment_id, master_item_id, team_id, attempt_number, entered_quantity, created_at')
-    .order('created_at', { ascending: true });
-
-  if (error || countError) {
-    console.error('Erro ao carregar dashboard:', error || countError);
+  if (error || countError || teamsError || masterError) {
+    console.error('Erro ao carregar dashboard:', error || countError || teamsError || masterError);
     dashboardItems.innerHTML = '<p>Não foi possível carregar o dashboard no momento.</p>';
     if (dashboardStageGroups) dashboardStageGroups.innerHTML = '<p>Não foi possível carregar o acompanhamento das etapas.</p>';
+    dashboardMaterialTotal.textContent = '0';
     dashboardTotalCounted.textContent = '0';
-    dashboardTotalCorrect.textContent = '0';
-    dashboardTotalRetries.textContent = '0';
+    dashboardTotalProgress.textContent = '0';
+    dashboardTotalApproval.textContent = '0';
+    dashboardTotalTeams.textContent = '0';
     return;
   }
 
   const masterIds = [...new Set([...(assignments || []).map((item) => item.master_item_id), ...(countHistory || []).map((item) => item.master_item_id)].filter(Boolean))];
   const teamIds = [...new Set([...(assignments || []).map((item) => item.team_id), ...(countHistory || []).map((item) => item.team_id)].filter(Boolean))];
 
-  let masterItems = [];
-  let teams = [];
+  let masterItems = allMasterItems || [];
+  let teams = allTeams || [];
 
   if (masterIds.length) {
-    const { data: masterData, error: masterError } = await supabase
+    const { data: masterData, error: masterFetchError } = await supabase
       .from('master_inventory_items')
       .select('id, descricao, material, base_quantity')
       .in('id', masterIds);
 
-    if (masterError) {
-      console.error('Erro ao carregar materiais do dashboard:', masterError);
-    } else {
-      masterItems = masterData || [];
+    if (!masterFetchError && masterData) {
+      masterItems = masterData;
     }
   }
 
   if (teamIds.length) {
-    const { data: teamData, error: teamError } = await supabase
+    const { data: teamData, error: teamFetchError } = await supabase
       .from('teams')
       .select('id, name1, name2')
       .in('id', teamIds);
 
-    if (teamError) {
-      console.error('Erro ao carregar equipes do dashboard:', teamError);
-    } else {
-      teams = teamData || [];
+    if (!teamFetchError && teamData) {
+      teams = teamData;
     }
   }
 
@@ -746,17 +765,18 @@ async function loadDashboard() {
       teamData: teamMap[item.team_id] || null,
     }));
 
+  const activeAssignments = (assignments || []).filter((item) => !item.resolved && !item.removed);
+  const materialTotal = masterItems.length;
   const totalCounted = resolvedItems.length;
-  const totalCorrect = resolvedItems.filter((item) => {
-    const baseQty = Number(item.itemData?.base_quantity ?? 0);
-    const foundQty = Number(item.found_quantity ?? -1);
-    return baseQty > 0 && foundQty === baseQty;
-  }).length;
-  const totalRetries = (assignments || []).filter((item) => Number(item.attempts ?? 0) > 3).length;
+  const totalTeams = teams.length;
+  const totalInProgress = activeAssignments.length;
+  const totalApproval = (assignments || []).filter((item) => !item.resolved && !item.removed && Number(item.attempts ?? 0) >= 2 && Number(item.attempts ?? 0) <= 3 && item.found_quantity !== null && item.found_quantity !== undefined).length;
 
+  dashboardMaterialTotal.textContent = String(materialTotal);
   dashboardTotalCounted.textContent = String(totalCounted);
-  dashboardTotalCorrect.textContent = String(totalCorrect);
-  dashboardTotalRetries.textContent = String(totalRetries);
+  dashboardTotalProgress.textContent = String(totalInProgress);
+  dashboardTotalApproval.textContent = String(totalApproval);
+  dashboardTotalTeams.textContent = String(totalTeams);
 
   const stageGroups = {
     1: [],
