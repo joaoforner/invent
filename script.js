@@ -341,27 +341,45 @@ async function exportDashboardToXlsx() {
 
   dashboardMessage.textContent = 'Gerando arquivo Excel...';
 
-  const { data: counts, error } = await supabase
-    .from('team_item_counts')
-    .select('id, assignment_id, master_item_id, team_id, attempt_number, entered_quantity, base_quantity, created_at')
-    .order('created_at', { ascending: true });
+  const { data: finalizedAssignments, error: assignmentsError } = await supabase
+    .from('team_item_assignments')
+    .select('id, master_item_id, team_id, attempts, resolved, removed')
+    .eq('resolved', true)
+    .eq('removed', false)
+    .order('id', { ascending: true });
 
-  if (error) {
-    console.error('Erro ao buscar histórico de contagem para exportação:', error);
-    dashboardMessage.textContent = `Não foi possível exportar o Excel: ${error.message}`;
+  if (assignmentsError) {
+    console.error('Erro ao buscar itens finalizados para exportação:', assignmentsError);
+    dashboardMessage.textContent = `Não foi possível exportar o Excel: ${assignmentsError.message}`;
     return;
   }
 
-  const masterIds = [...new Set((counts || []).map((count) => count.master_item_id).filter(Boolean))];
-  const teamIds = [...new Set((counts || []).map((count) => count.team_id).filter(Boolean))];
+  if (!finalizedAssignments || finalizedAssignments.length === 0) {
+    dashboardMessage.textContent = 'Ainda não há itens finalizados para exportar.';
+    return;
+  }
 
+  const assignmentIds = finalizedAssignments.map((assignment) => assignment.id);
+  const { data: counts, error: countsError } = await supabase
+    .from('team_item_counts')
+    .select('assignment_id, master_item_id, team_id, attempt_number, entered_quantity, base_quantity, created_at')
+    .in('assignment_id', assignmentIds)
+    .order('attempt_number', { ascending: true })
+    .order('created_at', { ascending: true });
+
+  if (countsError) {
+    console.error('Erro ao buscar histórico das contagens para exportação:', countsError);
+    dashboardMessage.textContent = `Não foi possível exportar o Excel: ${countsError.message}`;
+    return;
+  }
+
+  const masterIds = [...new Set((finalizedAssignments || []).map((assignment) => assignment.master_item_id).filter(Boolean))];
   let masterItems = [];
-  let teams = [];
 
   if (masterIds.length) {
     const { data: itemsData, error: itemsError } = await supabase
       .from('master_inventory_items')
-      .select('id, material, descricao, base_quantity')
+      .select('id, planta, classe, material, descricao, base_quantity, umb, pos_dpst, dep, desc_deposito')
       .in('id', masterIds);
 
     if (itemsError) {
@@ -371,51 +389,57 @@ async function exportDashboardToXlsx() {
     }
   }
 
-  if (teamIds.length) {
-    const { data: teamData, error: teamError } = await supabase
-      .from('teams')
-      .select('id, name1, name2')
-      .in('id', teamIds);
-
-    if (teamError) {
-      console.error('Erro ao buscar equipes do Excel:', teamError);
-    } else {
-      teams = teamData || [];
-    }
-  }
-
   const masterMap = Object.fromEntries(masterItems.map((item) => [item.id, item]));
-  const teamMap = Object.fromEntries(teams.map((team) => [team.id, team]));
+  const countsByAssignment = new Map();
 
-  const rows = (counts || []).map((count) => {
-    const item = masterMap[count.master_item_id] || {};
-    const team = teamMap[count.team_id] || null;
+  (counts || []).forEach((count) => {
+    const assignmentId = Number(count.assignment_id);
+    const existing = countsByAssignment.get(assignmentId) || [];
+    existing.push(count);
+    countsByAssignment.set(assignmentId, existing);
+  });
+
+  const rows = finalizedAssignments.map((assignment, index) => {
+    const item = masterMap[assignment.master_item_id] || {};
+    const assignmentCounts = countsByAssignment.get(Number(assignment.id)) || [];
+    const countMap = Object.fromEntries(
+      assignmentCounts.map((count) => [Number(count.attempt_number ?? 0), Number(count.entered_quantity ?? 0)])
+    );
+
+    const firstCount = countMap[1] ?? '';
+    const secondCount = countMap[2] ?? '';
+    const thirdCount = countMap[3] ?? '';
+    const fourthCount = countMap[4] ?? '';
+
+    const needsSecond = Object.prototype.hasOwnProperty.call(countMap, 2) ? 'Sim' : 'Não';
+    const needsThird = Object.prototype.hasOwnProperty.call(countMap, 3) ? 'Sim' : 'Não';
+    const needsFourth = Object.prototype.hasOwnProperty.call(countMap, 4) ? 'Sim' : 'Não';
 
     return {
-      'ID usuário': count.team_id,
-      'Nome usuário': team ? `${team.name1} e ${team.name2}` : '—',
-      'ID atribuição': count.assignment_id,
-      'Item': item.descricao || item.material || `Item ${count.master_item_id}`,
-      'Material': item.material || '—',
-      'Quantidade base': Number(item.base_quantity ?? count.base_quantity ?? 0),
-      'Quantidade encontrada': Number(count.entered_quantity ?? 0),
-      'Contagem': Number(count.attempt_number ?? 1),
-      'Data da contagem': count.created_at ? new Date(count.created_at).toLocaleString('pt-BR') : '—',
+      'Índice': index + 1,
+      'Depósito': item.dep || item.desc_deposito || '',
+      'Prateleira': item.pos_dpst || '',
+      'Código do item': item.material || '',
+      'Descrição do item': item.descricao || '',
+      'UMB': item.umb || '',
+      'Quantidade base': Number(item.base_quantity ?? 0),
+      '1º contagem': firstCount === '' ? '' : firstCount,
+      'Necessita da Segunda?': needsSecond,
+      '2º contagem': secondCount === '' ? '' : secondCount,
+      'Necessita da Terceira?': needsThird,
+      '3º contagem': thirdCount === '' ? '' : thirdCount,
+      'Necessita da Quarta?': needsFourth,
+      '4º contagem': fourthCount === '' ? '' : fourthCount,
     };
   });
 
-  if (!rows.length) {
-    dashboardMessage.textContent = 'Ainda não há contagens para exportar.';
-    return;
-  }
-
   const worksheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Histórico de contagem');
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Itens finalizados');
 
   const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-  XLSX.writeFile(workbook, `historico-contagem-${timestamp}.xlsx`);
-  dashboardMessage.textContent = `Arquivo Excel gerado com ${rows.length} registro(s).`;
+  XLSX.writeFile(workbook, `itens-finalizados-${timestamp}.xlsx`);
+  dashboardMessage.textContent = `Arquivo Excel gerado com ${rows.length} item(ns) finalizado(s).`;
 }
 
 async function moveItemToTeam(assignmentId, targetTeamId) {
@@ -960,19 +984,7 @@ async function createTeam() {
     return;
   }
 
-  const { data: existingTeams, error: listError } = await supabase.from('teams').select('id');
-  if (listError) {
-    console.error('Erro ao consultar equipes:', listError);
-    teamMessage.textContent = `Erro ao consultar equipes: ${listError.message}`;
-    return;
-  }
-
-  const otherTeamIds = (existingTeams || []).map((team) => team.id);
-  const alt_team_id = otherTeamIds.length > 0
-    ? otherTeamIds[Math.floor(Math.random() * otherTeamIds.length)]
-    : null;
-
-  const { error } = await supabase.from('teams').insert({ name1, name2, alt_team_id });
+  const { error } = await supabase.from('teams').insert({ name1, name2 });
   if (error) {
     console.error('Erro ao cadastrar equipe:', error);
     teamMessage.textContent = `Erro ao cadastrar equipe: ${error.message}`;
@@ -1024,21 +1036,34 @@ async function deleteTeam(teamId) {
   });
 }
 
-// Escolhe aleatoriamente uma equipe alternativa para cada equipe cadastrada.
+// Define uma atribuição única de equipe alternativa para cada equipe cadastrada.
 async function rebuildAltLinks() {
-  const { data: teams } = await supabase.from('teams').select('id');
+  const { data: teams } = await supabase
+    .from('teams')
+    .select('id')
+    .order('id', { ascending: true });
+
   if (!teams || teams.length === 0) return;
 
-  const updates = teams.map((team) => {
-    const alternateOptions = teams.filter((other) => other.id !== team.id);
-    const alt_team_id = alternateOptions.length
-      ? alternateOptions[Math.floor(Math.random() * alternateOptions.length)].id
-      : null;
-    return { id: team.id, alt_team_id };
-  });
+  const teamIds = [...teams.map((team) => team.id)];
+  const shuffled = [...teamIds];
+
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]];
+  }
+
+  const updates = shuffled.map((teamId, index) => ({
+    id: teamId,
+    alt_team_id: shuffled.length > 1 ? shuffled[(index + 1) % shuffled.length] : null,
+  }));
 
   for (const item of updates) {
-    const { error: updateErr } = await supabase.from('teams').update({ alt_team_id: item.alt_team_id }).eq('id', item.id);
+    const { error: updateErr } = await supabase
+      .from('teams')
+      .update({ alt_team_id: item.alt_team_id })
+      .eq('id', item.id);
+
     if (updateErr) {
       console.error('Erro ao atualizar alt_team_id para', item.id, updateErr);
     }
@@ -1108,7 +1133,7 @@ async function loadItemsForTeam(teamId) {
     if (masterIds.length) {
       const { data: masters, error: mastersErr } = await supabase
         .from('master_inventory_items')
-        .select('id, material, pos_dpst, dep, desc_deposito')
+        .select('id, material, pos_dpst, dep, desc_deposito, umb')
         .in('id', masterIds);
       if (mastersErr) {
         console.error('Erro ao buscar master_inventory_items:', mastersErr);
@@ -1142,9 +1167,15 @@ async function loadItemsForTeam(teamId) {
     return;
   }
 
+  const orderedData = [...data].sort((a, b) => {
+    const attemptsA = Number(a.attempts ?? 0);
+    const attemptsB = Number(b.attempts ?? 0);
+    return attemptsA - attemptsB;
+  });
+
   inventoryListCard.classList.remove('hidden');
   // Renderiza os itens sem edição; eles vêm do cadastro mestre e devem ser únicos.
-  data.forEach((item) => {
+  orderedData.forEach((item) => {
     const card = document.createElement('article');
     card.className = 'item-card';
     card.innerHTML = `
@@ -1152,7 +1183,7 @@ async function loadItemsForTeam(teamId) {
       <p><strong>Item:</strong> ${item.name}</p>
       <p><strong>Prateleira:</strong> ${item.pos_dpst ?? '—'}</p>
       <p><strong>Depósito:</strong> ${item.dep ?? '—'}</p>
-      <p><strong>Descrição do depósito:</strong> ${item.desc_deposito ?? '—'}</p>
+      <p><strong>Unidade de medida:</strong> ${item.umb ?? '—'}</p>
       <p><strong>Tentativas:</strong> ${item.attempts} / 4</p>
       <p><strong>Status:</strong> ${item.resolved ? 'Resolvido' : 'Aberto'}</p>
       <div class="actions">
@@ -1202,7 +1233,7 @@ function selectItem(item) {
     <p><strong>Código material:</strong> ${item.material ?? '—'}</p>
     <p><strong>Posição depósito:</strong> ${item.pos_dpst ?? '—'}</p>
     <p><strong>Departamento:</strong> ${item.dep ?? '—'}</p>
-    <p><strong>Descrição depósito:</strong> ${item.desc_deposito ?? '—'}</p>
+    <p><strong>Unidade de medida:</strong> ${item.umb ?? '—'}</p>
     <p><strong>Tentativas até agora:</strong> ${item.attempts}</p>
   `;
   if (itemFoundQtyInput) itemFoundQtyInput.value = '';
