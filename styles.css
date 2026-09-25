@@ -229,11 +229,32 @@ body {
 .dashboard-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 12px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
+.dashboard-upload-btn,
 .dashboard-export-btn {
   min-width: 180px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.8rem 1.2rem;
+  border-radius: 12px;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  color: #f8fbff;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  text-decoration: none;
+  box-shadow: 0 10px 20px rgba(14, 165, 233, 0.2);
+}
+
+.dashboard-upload-btn:hover,
+.dashboard-export-btn:hover {
+  transform: translateY(-1px);
 }
 
 .dashboard-grid {
@@ -449,10 +470,12 @@ body {
   background: rgba(2, 6, 23, 0.76);
   backdrop-filter: blur(4px);
   z-index: 1000;
+  pointer-events: auto;
 }
 
 .app-confirm-modal.hidden {
   display: none;
+  pointer-events: none;
 }
 
 .app-confirm-dialog {

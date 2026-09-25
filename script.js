@@ -8,6 +8,31 @@ const SUPABASE_KEY = 'sb_publishable_ErzcEbUVmgapel5XRrrKAw_vpVzr_KH';
 // Cria cliente Supabase para comunicar com o banco de dados
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// O Supabase limita a quantidade de linhas retornadas por requisição (Max Rows do projeto,
+// geralmente 1000). Sem paginação, planilhas grandes fazem itens "sumirem" silenciosamente
+// (ficam de fora do resultado sem gerar nenhum erro). Esta função busca todas as páginas.
+async function fetchAllRows(buildQuery, pageSize = 1000) {
+  let from = 0;
+  const allRows = [];
+
+  while (true) {
+    const { data, error } = await buildQuery(from, from + pageSize - 1);
+    if (error) {
+      return { data: allRows, error };
+    }
+
+    allRows.push(...(data || []));
+
+    if (!data || data.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
+  }
+
+  return { data: allRows, error: null };
+}
+
 // Estado global do app: guarda a equipe atual e o item selecionado
 const state = {
   currentTeam: null,  // Equipe carregada atualmente
@@ -74,6 +99,7 @@ const dashboardContent = document.getElementById('dashboard-content');
 const dashboardUsernameInput = document.getElementById('dashboard-username');
 const dashboardPasswordInput = document.getElementById('dashboard-password');
 const dashboardLogoutButton = document.getElementById('btn-dashboard-logout');
+const dashboardUploadInput = document.getElementById('dashboard-upload-input');
 const appConfirmModal = document.getElementById('app-confirm-modal');
 const appConfirmTitle = document.getElementById('app-confirm-title');
 const appConfirmMessage = document.getElementById('app-confirm-message');
@@ -90,6 +116,7 @@ const itemFoundQtyInput = document.getElementById('item-found-qty');
 
 // Inicializa o app: configura navegação, formulários e carrega a lista de equipes
 async function init() {
+  closeConfirmModal();
   attachNavigation();
   attachForms();
   await loadTeams();
@@ -187,6 +214,14 @@ function attachForms() {
     dashboardLogoutButton.addEventListener('click', logoutFromDashboard);
   }
 
+  if (dashboardUploadInput) {
+    dashboardUploadInput.addEventListener('change', handleDashboardUpload);
+  }
+
+  if (itemFoundQtyInput) {
+    itemFoundQtyInput.addEventListener('input', updateSelectedItemValuePreview);
+  }
+
   if (appConfirmCancel) {
     appConfirmCancel.addEventListener('click', () => closeConfirmModal());
   }
@@ -275,6 +310,490 @@ function closeConfirmModal() {
   appConfirmModal.setAttribute('aria-hidden', 'true');
 }
 
+function normalizeHeaderKey(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/\uFEFF/g, '')
+    .replace(/\u00a0/g, ' ')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+// Converte um valor de planilha em número, aceitando formato BR (1.234,56), US (1234.56)
+// e valores combinados com texto (ex.: "90 PEC" -> 90).
+function parseNumericValue(value) {
+  if (value === null || value === undefined || value === '') {
+    return 0;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return 0;
+  }
+
+  const numericMatch = text.match(/[-+]?\d[\d.,]*/);
+  if (!numericMatch) {
+    return 0;
+  }
+
+  let numericText = numericMatch[0];
+  const hasComma = numericText.includes(',');
+  const hasDot = numericText.includes('.');
+
+  if (hasComma && hasDot) {
+    const lastComma = numericText.lastIndexOf(',');
+    const lastDot = numericText.lastIndexOf('.');
+    const decimalIndex = Math.max(lastComma, lastDot);
+    const integerPart = numericText.slice(0, decimalIndex).replace(/[.,]/g, '');
+    const decimalPart = numericText.slice(decimalIndex + 1).replace(/[.,]/g, '');
+    numericText = `${integerPart}.${decimalPart}`;
+  } else if (hasComma) {
+    numericText = numericText.replace(/\./g, '').replace(',', '.');
+  } else if (hasDot) {
+    // "18.500" (milhar) vira 18500; "18.5" (decimal) permanece 18.5.
+    const parts = numericText.split('.');
+    if (parts.length === 2 && parts[1].length === 3) {
+      numericText = parts.join('');
+    }
+  }
+
+  const result = Number(numericText);
+  return Number.isFinite(result) ? result : 0;
+}
+
+// Extrai a unidade de medida de um valor combinado, ex.: "90 PEC" -> "PEC".
+function parseUnitFromValue(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return '';
+  }
+
+  const unitMatch = text.match(/[A-Za-zÀ-ÖØ-öø-ÿ/°%]+$/);
+  return unitMatch ? unitMatch[0].trim().toUpperCase() : '';
+}
+
+function normalizeCurrencyCode(value) {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  if (!normalized) return 'BRL';
+
+  const aliases = {
+    BRL: 'BRL',
+    REAL: 'BRL',
+    REAIS: 'BRL',
+    R$: 'BRL',
+    'R$': 'BRL',
+    USD: 'USD',
+    US$: 'USD',
+    'US$': 'USD',
+    DOLAR: 'USD',
+    DÓLAR: 'USD',
+    EUR: 'EUR',
+    EURO: 'EUR',
+    '€': 'EUR',
+  };
+
+  return aliases[normalized] || aliases[normalized.replace(/\s+/g, '')] || normalized;
+}
+
+// Retorna o valor da primeira coluna encontrada entre os alias informados.
+// Assume que `row` já teve suas chaves normalizadas por normalizeHeaderKey.
+function pickBestAliasValue(row, rowKeys, primaryAliases, secondaryAliases = []) {
+  const aliases = [...primaryAliases, ...secondaryAliases];
+
+  for (const alias of aliases) {
+    const value = row[normalizeHeaderKey(alias)];
+    if (value !== null && value !== undefined && String(value).trim() !== '') {
+      return value;
+    }
+  }
+
+  // Fallback: quando nenhuma coluna bate exatamente com os aliases (ex.: cabeçalho com
+  // texto extra tipo "cod_base_quantity_sap" ou "umb_1" por causa de coluna duplicada),
+  // procura uma coluna cuja chave normalizada contenha o alias (ou vice-versa).
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeHeaderKey(alias);
+    if (normalizedAlias.length < 3) continue;
+
+    for (const key of rowKeys) {
+      if (key === normalizedAlias) continue;
+      if (key.includes(normalizedAlias) || normalizedAlias.includes(key)) {
+        const value = row[key];
+        if (value !== null && value !== undefined && String(value).trim() !== '') {
+          return value;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function isLikelyMaterialReference(value) {
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  const stringValue = String(value).trim();
+  if (!stringValue) {
+    return false;
+  }
+
+  const cleanValue = stringValue.replace(/\s+/g, '');
+  return /^[-+]?\d[\d.,]*$/.test(cleanValue)
+    || /^[A-Z0-9-]+$/.test(stringValue)
+    || /^\d{6,}$/.test(cleanValue);
+}
+
+function extractDescriptionValue(row, rowKeys) {
+  const aliasPriority = [
+    'descricao',
+    'description',
+    'textodescricao',
+    'descricaodoproduto',
+    'descricaodomaterial',
+    'descricaoitem',
+    'descricaodoitem',
+    'itemdescricao',
+    'materialdescription',
+    'desc',
+    'nomeitem',
+    'descricaoitemmaterial',
+    'descricao_material',
+    'descriptionmaterial',
+    'descmaterial',
+    'itemtext',
+    'materiaprima',
+    'descricaodoitemmaterial',
+    'descricaoitemmat',
+    'nome',
+    'textobrevematerial',
+    'textobreve',
+    'shorttext',
+  ];
+
+  const aliasIndex = new Map(aliasPriority.map((alias, index) => [normalizeHeaderKey(alias), index]));
+  const matches = [];
+
+  for (const rowKey of rowKeys) {
+    const normalizedKey = normalizeHeaderKey(rowKey);
+    const aliasRank = aliasIndex.get(normalizedKey);
+    if (aliasRank === undefined) {
+      continue;
+    }
+
+    const value = row[rowKey];
+    if (value === null || value === undefined || String(value).trim() === '') {
+      continue;
+    }
+
+    const stringValue = String(value).trim();
+    const isTextualDescription = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(stringValue)
+      || /\s/.test(stringValue)
+      || !/^[-+]?\d([\d.,]*\d)?$/.test(stringValue);
+
+    if (!isTextualDescription || isLikelyMaterialReference(stringValue)) {
+      if (normalizedKey.includes('material') && !normalizedKey.includes('descricao') && !normalizedKey.includes('description') && !normalizedKey.includes('textobreve') && !normalizedKey.includes('shorttext')) {
+        continue;
+      }
+    }
+
+    matches.push({
+      aliasRank,
+      value: stringValue,
+      isTextualDescription,
+    });
+  }
+
+  if (matches.length) {
+    const textualMatches = matches.filter((entry) => entry.isTextualDescription);
+    if (textualMatches.length) {
+      textualMatches.sort((a, b) => a.aliasRank - b.aliasRank || a.value.localeCompare(b.value));
+      return textualMatches[0].value;
+    }
+
+    matches.sort((a, b) => a.aliasRank - b.aliasRank || a.value.localeCompare(b.value));
+    return matches[0].value;
+  }
+
+  return null;
+}
+
+function formatMoney(value, currency) {
+  const amount = Number(value ?? 0);
+  const code = normalizeCurrencyCode(currency);
+
+  try {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: code,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch (error) {
+    return `${amount.toFixed(2)} ${code}`;
+  }
+}
+
+function updateSelectedItemValuePreview() {
+  if (!state.selectedItem || !itemFoundQtyInput || !selectedItemInfo) {
+    return;
+  }
+
+  const enteredQuantity = Number(itemFoundQtyInput.value ?? NaN);
+  const unitValue = Number(state.selectedItem.unit_value ?? state.selectedItem.unitValue ?? 0);
+  const currency = normalizeCurrencyCode(state.selectedItem.currency || 'BRL');
+
+  const totalValueLine = selectedItemInfo.querySelector('[data-total-value]');
+  if (!Number.isFinite(enteredQuantity) || enteredQuantity < 0 || !(unitValue > 0)) {
+    if (totalValueLine) {
+      totalValueLine.textContent = 'Valor total da quantidade: —';
+    }
+    return;
+  }
+
+  const totalValue = enteredQuantity * unitValue;
+  if (totalValueLine) {
+    totalValueLine.textContent = `Valor total da quantidade: ${formatMoney(totalValue, currency)}`;
+  }
+}
+
+async function handleDashboardUpload(event) {
+  const file = event.target?.files?.[0];
+  if (!file) return;
+
+  if (!dashboardMessage) return;
+
+  dashboardMessage.textContent = 'Importando materiais da planilha...';
+
+  try {
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    const firstSheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[firstSheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: null, raw: true, blankrows: false });
+
+    if (!rows || rows.length === 0) {
+      dashboardMessage.textContent = 'A planilha não contém linhas válidas para importar.';
+      event.target.value = '';
+      return;
+    }
+
+    // Ajuda a diagnosticar planilhas cujo cabeçalho não bate com os aliases esperados.
+    console.log('[Importação] Colunas detectadas na planilha:', Object.keys(rows[0] || {}));
+
+    const normalizedRows = rows
+      .map((row) => {
+        const normalized = {};
+        Object.entries(row).forEach(([key, value]) => {
+          const normalizedKey = normalizeHeaderKey(key);
+          // Preserva o primeiro valor não vazio quando duas colunas normalizam para a mesma chave
+          // (ex.: cabeçalho duplicado gerado pelo SheetJS como "umb" e "umb_1").
+          const existing = normalized[normalizedKey];
+          if (existing === undefined || existing === null || String(existing).trim() === '') {
+            normalized[normalizedKey] = value;
+          }
+        });
+        return normalized;
+      })
+      .filter((row) => Object.values(row).some((value) => value !== null && value !== undefined && String(value).trim() !== ''));
+
+    console.log('[Importação] Colunas normalizadas:', Object.keys(normalizedRows[0] || {}));
+
+    const importedItems = normalizedRows
+      .map((row) => {
+        const rowKeys = Object.keys(row);
+
+        const material = pickBestAliasValue(row, rowKeys,
+          ['material', 'matnr', 'codigomaterial', 'codigoditem', 'codigoitem', 'codigodoproduto', 'codigomater', 'codigo', 'materialcode', 'itemcode', 'materialnumber', 'itemnumber'],
+          ['materialcode', 'code', 'materialnum', 'materialid']
+        );
+
+        if (!material || !String(material).trim()) {
+          return null;
+        }
+
+        const description = extractDescriptionValue(row, rowKeys) || pickBestAliasValue(row, rowKeys, ['descricao', 'description', 'desc', 'textobreve', 'shorttext']) || '';
+        const normalizedDescription = String(description ?? '').trim();
+
+        const baseQuantityRaw = pickBestAliasValue(row, rowKeys,
+          // "Utilização livre" é o nome padrão SAP (MB52) para o estoque disponível/base.
+          ['utilizacaolivre', 'utilizlivre', 'base_quantity', 'basequantity', 'quantidadebase', 'qtdbase', 'qtybase', 'quantity', 'qtde', 'stockquantity', 'qty', 'quantidade', 'baseqty', 'base'],
+          ['utilizacaolivre', 'utilizlivre', 'estoquelivre', 'unrestricteduse', 'unrestrictedstock', 'freestock']
+        );
+        const umbRaw = pickBestAliasValue(row, rowKeys,
+          ['umb', 'unidade', 'unidademedida', 'unidmedida', 'unit', 'uom', 'measure', 'unitofmeasure', 'medida', 'undmed'],
+          ['umb', 'unidade', 'unidademedida', 'unidmedida', 'unit', 'uom', 'measure', 'unitofmeasure', 'medida', 'undmed']
+        );
+
+        const baseQuantity = parseNumericValue(baseQuantityRaw);
+        // Quando a UMB não vem em coluna própria, ela costuma estar junto do número (ex.: "90 PEC").
+        const umb = String(umbRaw ?? '').trim().toUpperCase() || parseUnitFromValue(baseQuantityRaw);
+
+        const unitValue = parseNumericValue(
+          pickBestAliasValue(row, rowKeys,
+            ['unit_value', 'unitvalue', 'unitval', 'valorunitario', 'valor_unitario', 'unitprice', 'precounitario', 'valorunit', 'preco', 'unitpricebrl', 'unitpricevalue', 'valorunitarioitem'],
+            ['unit_value', 'unitvalue', 'unitval', 'valorunitario', 'valor_unitario', 'unitprice', 'precounitario', 'valorunit', 'preco']
+          )
+        );
+
+        const currency = normalizeCurrencyCode(
+          pickBestAliasValue(row, rowKeys,
+            ['currency', 'moeda', 'currencykey', 'divisa', 'moneda', 'curr', 'coin'],
+            ['currency', 'moeda', 'currencykey', 'divisa', 'moneda', 'curr']
+          ) ?? 'BRL'
+        );
+
+        const dep = pickBestAliasValue(row, rowKeys, ['dep', 'deposito', 'deposit', 'depo', 'warehouse'], ['dep', 'deposito', 'deposit', 'depo']) ?? '';
+        const descDeposito = pickBestAliasValue(row, rowKeys, ['descdeposito', 'descricaododeposito', 'descricaodeposito', 'depositodescricao', 'descriptiondeposit', 'depositodesc'], ['desc_deposito', 'descdeposito', 'descricaododeposito', 'depositodescricao']) ?? '';
+        const posDpst = pickBestAliasValue(row, rowKeys, ['posdpst', 'prateleira', 'position', 'storagebin', 'loc', 'bin', 'slot'], ['pos_dpst', 'prateleira', 'position', 'storagebin', 'loc']) ?? '';
+        const planta = pickBestAliasValue(row, rowKeys, ['planta', 'plant'], ['planta', 'plant']) ?? '';
+        const classe = pickBestAliasValue(row, rowKeys, ['classe', 'class', 'category'], ['classe', 'class', 'category']) ?? '';
+
+        return {
+          planta: String(planta ?? '').trim(),
+          classe: String(classe ?? '').trim(),
+          material: String(material).trim(),
+          descricao: normalizedDescription || String(material).trim(),
+          base_quantity: baseQuantity,
+          umb: String(umb ?? '').trim(),
+          pos_dpst: String(posDpst ?? '').trim(),
+          dep: String(dep ?? '').trim(),
+          desc_deposito: String(descDeposito ?? '').trim(),
+          unit_value: Number(unitValue || 0),
+          currency,
+        };
+      })
+      .filter(Boolean);
+
+    if (!importedItems.length) {
+      dashboardMessage.textContent = 'Nenhum material válido foi encontrado na planilha.';
+      event.target.value = '';
+      return;
+    }
+
+    const { error: clearLegacyItemsError } = await supabase
+      .from('inventory_items')
+      .delete()
+      .neq('id', 0);
+
+    if (clearLegacyItemsError) {
+      throw clearLegacyItemsError;
+    }
+
+    const { error: clearCountsError } = await supabase
+      .from('team_item_counts')
+      .delete()
+      .neq('id', 0);
+
+    if (clearCountsError) {
+      throw clearCountsError;
+    }
+
+    const { error: clearAssignmentsError } = await supabase
+      .from('team_item_assignments')
+      .delete()
+      .neq('id', 0);
+
+    if (clearAssignmentsError) {
+      throw clearAssignmentsError;
+    }
+
+    const { error: clearMasterError } = await supabase
+      .from('master_inventory_items')
+      .delete()
+      .neq('id', 0);
+
+    if (clearMasterError) {
+      throw clearMasterError;
+    }
+
+    const { error: insertError } = await supabase
+      .from('master_inventory_items')
+      .insert(importedItems);
+
+    if (insertError) {
+      throw insertError;
+    }
+
+    const { data: teamRows, error: teamLoadError } = await supabase
+      .from('teams')
+      .select('id')
+      .order('id', { ascending: true });
+
+    if (teamLoadError) {
+      throw teamLoadError;
+    }
+
+    const teamIds = (teamRows || []).map((team) => Number(team.id)).filter(Number.isFinite);
+
+    if (teamIds.length === 0) {
+      dashboardMessage.textContent = 'Planilha importada, mas não há equipes cadastradas para receber os itens.';
+      event.target.value = '';
+      return;
+    }
+
+    const { data: insertedItemsData, error: insertedItemsError } = await fetchAllRows((from, to) =>
+      supabase
+        .from('master_inventory_items')
+        .select('id')
+        .order('id', { ascending: true })
+        .range(from, to)
+    );
+
+    if (insertedItemsError) {
+      throw insertedItemsError;
+    }
+
+    const assignmentsToInsert = (insertedItemsData || []).map((item, index) => ({
+      master_item_id: item.id,
+      team_id: teamIds[index % teamIds.length],
+      found_quantity: null,
+      attempts: 0,
+      resolved: false,
+      removed: false,
+    }));
+
+    if (assignmentsToInsert.length) {
+      const { error: assignmentInsertError } = await supabase
+        .from('team_item_assignments')
+        .insert(assignmentsToInsert);
+
+      if (assignmentInsertError) {
+        throw assignmentInsertError;
+      }
+    }
+
+    try {
+      const { error: redistributeError } = await supabase.rpc('redistribute_master_items');
+      if (redistributeError) {
+        console.warn('Função SQL de redistribuição indisponível; fallback em JavaScript ativado:', redistributeError);
+      }
+    } catch (error) {
+      console.warn('Redistribuição via RPC falhou; fallback em JavaScript foi usado.', error);
+    }
+
+    dashboardMessage.textContent = `Planilha importada com ${importedItems.length} material(is). Os itens foram atualizados e redistribuídos para as equipes existentes.`;
+    event.target.value = '';
+    await loadDashboard();
+    if (state.currentTeam) {
+      await loadItemsForTeam(state.currentTeam.id);
+    }
+  } catch (error) {
+    console.error('Erro ao importar a planilha:', error);
+    dashboardMessage.textContent = `Não foi possível importar a planilha: ${error.message || 'erro desconhecido'}`;
+    event.target.value = '';
+  }
+}
+
 function setDashboardTab(tabName) {
   if (!dashboardOverviewPanel || !dashboardReleasePanel) return;
 
@@ -334,6 +853,7 @@ function loginToDashboard() {
   }
 }
 
+
 async function exportDashboardToXlsx() {
   if (!dashboardMessage) {
     return;
@@ -341,12 +861,15 @@ async function exportDashboardToXlsx() {
 
   dashboardMessage.textContent = 'Gerando arquivo Excel...';
 
-  const { data: finalizedAssignments, error: assignmentsError } = await supabase
-    .from('team_item_assignments')
-    .select('id, master_item_id, team_id, attempts, resolved, removed')
-    .eq('resolved', true)
-    .eq('removed', false)
-    .order('id', { ascending: true });
+  const { data: finalizedAssignments, error: assignmentsError } = await fetchAllRows((from, to) =>
+    supabase
+      .from('team_item_assignments')
+      .select('id, master_item_id, team_id, attempts, resolved, removed')
+      .eq('resolved', true)
+      .eq('removed', false)
+      .order('id', { ascending: true })
+      .range(from, to)
+  );
 
   if (assignmentsError) {
     console.error('Erro ao buscar itens finalizados para exportação:', assignmentsError);
@@ -360,12 +883,15 @@ async function exportDashboardToXlsx() {
   }
 
   const assignmentIds = finalizedAssignments.map((assignment) => assignment.id);
-  const { data: counts, error: countsError } = await supabase
-    .from('team_item_counts')
-    .select('assignment_id, master_item_id, team_id, attempt_number, entered_quantity, base_quantity, created_at')
-    .in('assignment_id', assignmentIds)
-    .order('attempt_number', { ascending: true })
-    .order('created_at', { ascending: true });
+  const { data: counts, error: countsError } = await fetchAllRows((from, to) =>
+    supabase
+      .from('team_item_counts')
+      .select('assignment_id, master_item_id, team_id, attempt_number, entered_quantity, base_quantity, created_at')
+      .in('assignment_id', assignmentIds)
+      .order('attempt_number', { ascending: true })
+      .order('created_at', { ascending: true })
+      .range(from, to)
+  );
 
   if (countsError) {
     console.error('Erro ao buscar histórico das contagens para exportação:', countsError);
@@ -377,10 +903,13 @@ async function exportDashboardToXlsx() {
   let masterItems = [];
 
   if (masterIds.length) {
-    const { data: itemsData, error: itemsError } = await supabase
-      .from('master_inventory_items')
-      .select('id, planta, classe, material, descricao, base_quantity, umb, pos_dpst, dep, desc_deposito')
-      .in('id', masterIds);
+    const { data: itemsData, error: itemsError } = await fetchAllRows((from, to) =>
+      supabase
+        .from('master_inventory_items')
+        .select('id, planta, classe, material, descricao, base_quantity, umb, pos_dpst, dep, desc_deposito')
+        .in('id', masterIds)
+        .range(from, to)
+    );
 
     if (itemsError) {
       console.error('Erro ao buscar itens do Excel:', itemsError);
@@ -548,12 +1077,15 @@ async function finishDashboardRelease(assignmentId, shouldRelease) {
 async function loadDashboardReleaseItems() {
   if (!dashboardReleaseList) return;
 
-  const { data: assignments, error: assignmentError } = await supabase
-    .from('team_item_assignments')
-    .select('id, team_id, master_item_id, resolved, removed, attempts, found_quantity')
-    .eq('resolved', false)
-    .eq('removed', false)
-    .order('id', { ascending: true });
+  const { data: assignments, error: assignmentError } = await fetchAllRows((from, to) =>
+    supabase
+      .from('team_item_assignments')
+      .select('id, team_id, master_item_id, resolved, removed, attempts, found_quantity')
+      .eq('resolved', false)
+      .eq('removed', false)
+      .order('id', { ascending: true })
+      .range(from, to)
+  );
 
   if (assignmentError) {
     console.error('Erro ao carregar itens pendentes de liberação:', assignmentError);
@@ -567,11 +1099,14 @@ async function loadDashboardReleaseItems() {
   }
 
   const assignmentIds = assignments.map((item) => item.id);
-  const { data: countHistory, error: countError } = await supabase
-    .from('team_item_counts')
-    .select('id, assignment_id, master_item_id, team_id, attempt_number, entered_quantity, base_quantity, created_at')
-    .in('assignment_id', assignmentIds)
-    .order('created_at', { ascending: true });
+  const { data: countHistory, error: countError } = await fetchAllRows((from, to) =>
+    supabase
+      .from('team_item_counts')
+      .select('id, assignment_id, master_item_id, team_id, attempt_number, entered_quantity, base_quantity, created_at')
+      .in('assignment_id', assignmentIds)
+      .order('created_at', { ascending: true })
+      .range(from, to)
+  );
 
   if (countError) {
     console.error('Erro ao carregar histórico de contagem para aprovação:', countError);
@@ -582,10 +1117,13 @@ async function loadDashboardReleaseItems() {
   const masterIds = [...new Set((assignments || []).map((item) => item.master_item_id).filter(Boolean))];
   let masterItems = [];
   if (masterIds.length) {
-    const { data: masters, error: masterError } = await supabase
-      .from('master_inventory_items')
-      .select('id, descricao, material, base_quantity')
-      .in('id', masterIds);
+    const { data: masters, error: masterError } = await fetchAllRows((from, to) =>
+      supabase
+        .from('master_inventory_items')
+        .select('id, descricao, material, base_quantity, unit_value, currency')
+        .in('id', masterIds)
+        .range(from, to)
+    );
 
     if (!masterError && masters) {
       masterItems = masters;
@@ -668,8 +1206,11 @@ async function loadDashboardReleaseItems() {
     const releaseDescription = item.repeatedAttempt >= 3
       ? 'A 3ª contagem foi registrada com valor incorreto. Decida se libera para a 4ª contagem ou encerra o item.'
       : 'A 2ª contagem foi registrada com valor incorreto. Decida se libera para a 3ª contagem ou encerra o item.';
+    const unitValue = Number(masterItem?.unit_value ?? 0);
+    const currency = normalizeCurrencyCode(masterItem?.currency || 'BRL');
+    const formatQtyValue = (quantity) => (unitValue > 0 ? ` (${formatMoney(Number(quantity ?? 0) * unitValue, currency)})` : '');
     const historyMarkup = (item.history || [])
-      .map((entry) => `<li><span>${entry.attempt}ª contagem</span><strong>${entry.quantity}</strong></li>`)
+      .map((entry) => `<li><span>${entry.attempt}ª contagem</span><strong>${entry.quantity}${formatQtyValue(entry.quantity)}</strong></li>`)
       .join('');
 
     return `
@@ -680,8 +1221,8 @@ async function loadDashboardReleaseItems() {
             <div class="dashboard-release-meta">
               <span><strong>Equipe:</strong> ${teamLabel}</span>
               <span><strong>Etapa:</strong> ${approvalLabel}</span>
-              <span><strong>${item.repeatedAttempt - 1}ª:</strong> ${item.firstQuantity}</span>
-              <span><strong>${item.repeatedAttempt}ª:</strong> ${item.secondQuantity}</span>
+              <span><strong>${item.repeatedAttempt - 1}ª:</strong> ${item.firstQuantity}${formatQtyValue(item.firstQuantity)}</span>
+              <span><strong>${item.repeatedAttempt}ª:</strong> ${item.secondQuantity}${formatQtyValue(item.secondQuantity)}</span>
             </div>
           </div>
           <span class="dashboard-release-tag">Aguardando decisão</span>
@@ -720,22 +1261,34 @@ async function loadDashboard() {
   await loadDashboardReleaseItems();
 
   const [{ data: assignments, error }, { data: countHistory, error: countError }, { data: allTeams, error: teamsError }, { data: allMasterItems, error: masterError }] = await Promise.all([
-    supabase
-      .from('team_item_assignments')
-      .select('id, team_id, attempts, resolved, found_quantity, master_item_id, removed')
-      .order('id', { ascending: true }),
-    supabase
-      .from('team_item_counts')
-      .select('id, assignment_id, master_item_id, team_id, attempt_number, entered_quantity, created_at')
-      .order('created_at', { ascending: true }),
-    supabase
-      .from('teams')
-      .select('id')
-      .order('id', { ascending: true }),
-    supabase
-      .from('master_inventory_items')
-      .select('id, descricao, material, base_quantity')
-      .order('id', { ascending: true })
+    fetchAllRows((from, to) =>
+      supabase
+        .from('team_item_assignments')
+        .select('id, team_id, attempts, resolved, found_quantity, master_item_id, removed')
+        .order('id', { ascending: true })
+        .range(from, to)
+    ),
+    fetchAllRows((from, to) =>
+      supabase
+        .from('team_item_counts')
+        .select('id, assignment_id, master_item_id, team_id, attempt_number, entered_quantity, created_at')
+        .order('created_at', { ascending: true })
+        .range(from, to)
+    ),
+    fetchAllRows((from, to) =>
+      supabase
+        .from('teams')
+        .select('id')
+        .order('id', { ascending: true })
+        .range(from, to)
+    ),
+    fetchAllRows((from, to) =>
+      supabase
+        .from('master_inventory_items')
+        .select('id, descricao, material, base_quantity, unit_value, currency')
+        .order('id', { ascending: true })
+        .range(from, to)
+    ),
   ]);
 
   if (error || countError || teamsError || masterError) {
@@ -757,10 +1310,13 @@ async function loadDashboard() {
   let teams = allTeams || [];
 
   if (masterIds.length) {
-    const { data: masterData, error: masterFetchError } = await supabase
-      .from('master_inventory_items')
-      .select('id, descricao, material, base_quantity')
-      .in('id', masterIds);
+    const { data: masterData, error: masterFetchError } = await fetchAllRows((from, to) =>
+      supabase
+        .from('master_inventory_items')
+        .select('id, descricao, material, base_quantity, unit_value, currency')
+        .in('id', masterIds)
+        .range(from, to)
+    );
 
     if (!masterFetchError && masterData) {
       masterItems = masterData;
@@ -768,10 +1324,13 @@ async function loadDashboard() {
   }
 
   if (teamIds.length) {
-    const { data: teamData, error: teamFetchError } = await supabase
-      .from('teams')
-      .select('id, name1, name2')
-      .in('id', teamIds);
+    const { data: teamData, error: teamFetchError } = await fetchAllRows((from, to) =>
+      supabase
+        .from('teams')
+        .select('id, name1, name2')
+        .in('id', teamIds)
+        .range(from, to)
+    );
 
     if (!teamFetchError && teamData) {
       teams = teamData;
@@ -892,6 +1451,9 @@ async function loadDashboard() {
       const name = item.itemData?.descricao || item.itemData?.material || 'Item sem descrição';
       const baseQty = Number(item.itemData?.base_quantity ?? 0);
       const foundQty = Number(item.found_quantity ?? 0);
+      const unitValue = Number(item.itemData?.unit_value ?? 0);
+      const currency = normalizeCurrencyCode(item.itemData?.currency || 'BRL');
+      const totalValue = foundQty * unitValue;
       const teamLabel = item.teamData ? `${item.teamData.name1} e ${item.teamData.name2}` : `Equipe ${item.team_id}`;
       const status = foundQty === baseQty ? 'Correto' : 'Finalizado';
 
@@ -903,6 +1465,7 @@ async function loadDashboard() {
           <p><strong>Base:</strong> ${baseQty}</p>
           <p><strong>Informado:</strong> ${foundQty}</p>
           <p><strong>Contagens:</strong> ${item.attempts ?? 0}</p>
+          <p><strong>Valor total:</strong> ${unitValue > 0 ? formatMoney(totalValue, currency) : '—'}</p>
           <p class="dashboard-status"><strong>Status:</strong> ${status}</p>
         </article>
       `;
@@ -1107,10 +1670,13 @@ async function loadItemsForTeam(teamId) {
   let data = null;
   let error = null;
   try {
-    const viewResp = await supabase
-      .from('view_items_for_team')
-      .select('assignment_id, team_id, master_item_id, descricao, material, base_quantity, umb, found_quantity, attempts, resolved, removed')
-      .eq('team_id', teamId);
+    const viewResp = await fetchAllRows((from, to) =>
+      supabase
+        .from('view_items_for_team')
+        .select('assignment_id, team_id, master_item_id, descricao, material, base_quantity, umb, unit_value, currency, found_quantity, attempts, resolved, removed')
+        .eq('team_id', teamId)
+        .range(from, to)
+    );
     if (viewResp.error) throw viewResp.error;
     // Converte as linhas da view para o formato esperado pela interface.
     data = (viewResp.data || [])
@@ -1128,13 +1694,16 @@ async function loadItemsForTeam(teamId) {
         found_quantity: r.found_quantity,
         _table: 'team_item_assignments',
       }));
-    // Busca em lote os campos adicionais dos materiais mestres, quando existirem IDs.
+      // Busca em lote os campos adicionais dos materiais mestres, quando existirem IDs.
     const masterIds = Array.from(new Set(data.map((i) => i.master_item_id).filter(Boolean)));
     if (masterIds.length) {
-      const { data: masters, error: mastersErr } = await supabase
-        .from('master_inventory_items')
-        .select('id, material, pos_dpst, dep, desc_deposito, umb')
-        .in('id', masterIds);
+      const { data: masters, error: mastersErr } = await fetchAllRows((from, to) =>
+        supabase
+          .from('master_inventory_items')
+          .select('id, material, descricao, pos_dpst, dep, desc_deposito, umb, unit_value, currency')
+          .in('id', masterIds)
+          .range(from, to)
+      );
       if (mastersErr) {
         console.error('Erro ao buscar master_inventory_items:', mastersErr);
       } else if (masters) {
@@ -1178,12 +1747,18 @@ async function loadItemsForTeam(teamId) {
   orderedData.forEach((item) => {
     const card = document.createElement('article');
     card.className = 'item-card';
+    const unitValue = Number(item.unit_value ?? 0);
+    const currency = normalizeCurrencyCode(item.currency || 'BRL');
+    const materialCode = String(item.material ?? '').trim() || '—';
+    const descriptionText = String(item.descricao ?? '').trim() || String(item.name ?? '').trim() || '—';
     card.innerHTML = `
-      <p><strong>Descrição:</strong> ${item.material ?? '—'}</p>
-      <p><strong>Item:</strong> ${item.name}</p>
+      <p><strong>Código:</strong> ${materialCode}</p>
+      <p><strong>Item:</strong> ${descriptionText}</p>
       <p><strong>Prateleira:</strong> ${item.pos_dpst ?? '—'}</p>
       <p><strong>Depósito:</strong> ${item.dep ?? '—'}</p>
       <p><strong>Unidade de medida:</strong> ${item.umb ?? '—'}</p>
+      <p><strong>Valor unitário:</strong> ${unitValue > 0 ? formatMoney(unitValue, currency) : '—'}</p>
+      <p><strong>Moeda:</strong> ${currency || '—'}</p>
       <p><strong>Tentativas:</strong> ${item.attempts} / 4</p>
       <p><strong>Status:</strong> ${item.resolved ? 'Resolvido' : 'Aberto'}</p>
       <div class="actions">
@@ -1228,17 +1803,25 @@ async function createItemForCurrentTeam() {
 // Guarda o item escolhido e mostra seus dados no formulário de quantidade.
 function selectItem(item) {
   state.selectedItem = item;
+  const unitValue = Number(item.unit_value ?? 0);
+  const currency = normalizeCurrencyCode(item.currency || 'BRL');
+  const materialCode = String(item.material ?? '').trim() || '—';
+  const descriptionText = String(item.descricao ?? '').trim() || String(item.name ?? '').trim() || '—';
   selectedItemInfo.innerHTML = `
-    <p><strong>Item:</strong> ${item.name}</p>
-    <p><strong>Código material:</strong> ${item.material ?? '—'}</p>
+    <p><strong>Código:</strong> ${materialCode}</p>
+    <p><strong>Item:</strong> ${descriptionText}</p>
     <p><strong>Posição depósito:</strong> ${item.pos_dpst ?? '—'}</p>
     <p><strong>Departamento:</strong> ${item.dep ?? '—'}</p>
     <p><strong>Unidade de medida:</strong> ${item.umb ?? '—'}</p>
+    <p><strong>Valor unitário:</strong> ${unitValue > 0 ? formatMoney(unitValue, currency) : '—'}</p>
+    <p><strong>Moeda:</strong> ${currency || '—'}</p>
+    <p data-total-value><strong>Valor total da quantidade:</strong> —</p>
     <p><strong>Tentativas até agora:</strong> ${item.attempts}</p>
   `;
   if (itemFoundQtyInput) itemFoundQtyInput.value = '';
   if (selectedItemCard) selectedItemCard.classList.remove('hidden');
   if (registerMessage) registerMessage.textContent = '';
+  updateSelectedItemValuePreview();
 
   // Leva o formulário para a área visível e deixa o campo pronto para digitação.
   if (selectedItemCard) {
@@ -1314,6 +1897,9 @@ async function registerItemQuantity() {
 
   const item = state.selectedItem;
   const baseQuantity = Number(item.base_quantity ?? 0);
+  const unitValue = Number(item.unit_value ?? 0);
+  const currency = normalizeCurrencyCode(item.currency || 'BRL');
+  const totalValue = unitValue > 0 ? enteredQuantity * unitValue : 0;
 
   if (item._table === 'team_item_assignments') {
     // A redistribuição pode recriar as atribuições enquanto a tela está aberta.
@@ -1383,6 +1969,10 @@ async function registerItemQuantity() {
       console.error('Erro ao buscar item atualizado:', fetchErr);
     }
 
+    const successMessage = unitValue > 0
+      ? `Quantidade registrada com sucesso. Valor da quantidade encontrada: ${formatMoney(totalValue, currency)}.`
+      : 'Quantidade registrada com sucesso.';
+
     if (!assignmentData || Number(assignmentData.attempts ?? 0) <= currentAttempt) {
       // Fallback para projetos em que a migration do trigger ainda não foi aplicada.
       const nextAttempt = currentAttempt + 1;
@@ -1416,8 +2006,46 @@ async function registerItemQuantity() {
           return;
         }
         registerMessage.textContent = enteredQuantity === baseQuantity
-          ? 'Quantidade correta salva. Item resolvido.'
-          : 'Item encerrado após quatro tentativas.';
+          ? `Quantidade correta salva. Item resolvido. ${unitValue > 0 ? `Valor encontrado: ${formatMoney(totalValue, currency)}.` : ''}`
+          : `Item encerrado após quatro tentativas. ${unitValue > 0 ? `Valor encontrado: ${formatMoney(totalValue, currency)}.` : ''}`;
+      } else if (nextAttempt === 1) {
+        // 1ª contagem incorreta: move o item para a equipe alternativa (mesma regra do trigger SQL).
+        const { data: teamRow } = await supabase
+          .from('teams')
+          .select('alt_team_id')
+          .eq('id', state.currentTeam.id)
+          .maybeSingle();
+
+        let nextTeamId = teamRow?.alt_team_id ?? null;
+        if (!nextTeamId || nextTeamId === state.currentTeam.id) {
+          const { data: fallbackTeam } = await supabase
+            .from('teams')
+            .select('id')
+            .neq('id', state.currentTeam.id)
+            .order('id', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          nextTeamId = fallbackTeam?.id ?? state.currentTeam.id;
+        }
+
+        const { error: moveError } = await supabase
+          .from('team_item_assignments')
+          .update({
+            team_id: nextTeamId,
+            attempts: nextAttempt,
+            found_quantity: null,
+            resolved: false,
+            removed: false,
+          })
+          .eq('id', assignmentId);
+
+        if (moveError) {
+          console.error('Erro ao mover item para equipe alternativa:', moveError);
+          registerMessage.textContent = `Erro ao mover o item para a equipe alternativa: ${moveError.message}`;
+          return;
+        }
+
+        registerMessage.textContent = `Quantidade registrada. O item foi movido para a equipe alternativa para a 2ª contagem. ${unitValue > 0 ? `Valor encontrado: ${formatMoney(totalValue, currency)}.` : ''}`;
       } else {
         const updateData = {
           attempts: nextAttempt,
@@ -1437,18 +2065,18 @@ async function registerItemQuantity() {
           return;
         }
 
-        registerMessage.textContent = 'Quantidade registrada. O item foi enviado para aprovação manual antes da próxima etapa.';
+        registerMessage.textContent = `Quantidade registrada. O item foi enviado para aprovação manual antes da próxima etapa. ${unitValue > 0 ? `Valor encontrado: ${formatMoney(totalValue, currency)}.` : ''}`;
       }
 
       await loadItemsForTeam(state.currentTeam.id);
     } else if (enteredQuantity === baseQuantity) {
-      registerMessage.textContent = 'Quantidade correta salva. Item resolvido.';
+      registerMessage.textContent = `Quantidade correta salva. Item resolvido. ${unitValue > 0 ? `Valor encontrado: ${formatMoney(totalValue, currency)}.` : ''}`;
     } else if (assignmentData?.removed) {
-      registerMessage.textContent = 'O item foi removido após 4 tentativas incorretas.';
+      registerMessage.textContent = `O item foi removido após 4 tentativas incorretas. ${unitValue > 0 ? `Valor encontrado: ${formatMoney(totalValue, currency)}.` : ''}`;
     } else if (assignmentData && assignmentData.team_id !== state.currentTeam.id) {
-      registerMessage.textContent = 'Quantidade registrada. O item foi enviado para aprovação manual antes da próxima etapa.';
+      registerMessage.textContent = `Quantidade registrada. O item foi enviado para aprovação manual antes da próxima etapa. ${unitValue > 0 ? `Valor encontrado: ${formatMoney(totalValue, currency)}.` : ''}`;
     } else {
-      registerMessage.textContent = 'Quantidade registrada. O item foi enviado para aprovação manual antes da próxima etapa.';
+      registerMessage.textContent = successMessage;
     }
 
     // Mantém o ID digitado pelo usuário e apenas atualiza a lista da equipe atual.
@@ -1468,9 +2096,9 @@ async function registerItemQuantity() {
     }
 
     if (enteredQuantity === baseQuantity) {
-      registerMessage.textContent = 'Quantidade correta salva. Item resolvido.';
+      registerMessage.textContent = `Quantidade correta salva. Item resolvido. ${unitValue > 0 ? `Valor encontrado: ${formatMoney(totalValue, currency)}.` : ''}`;
     } else {
-      registerMessage.textContent = 'Quantidade registrada. O sistema segue a regra do banco para movimentar ou remover o item.';
+      registerMessage.textContent = `Quantidade registrada. O sistema segue a regra do banco para movimentar ou remover o item. ${unitValue > 0 ? `Valor encontrado: ${formatMoney(totalValue, currency)}.` : ''}`;
     }
 
     await loadItemsForTeam(state.currentTeam.id);
